@@ -62,12 +62,20 @@ AnimMode animMode = ANIM_BREATHE;
 AnimMode prevMode = ANIM_BREATHE;
 
 enum PlayContext { CTX_MUSIC, CTX_RFID };
+enum BrowseMode  { BROWSE_MUSIC, BROWSE_RFID };
 
 bool isPlaying = false;
 PlayContext playContext = CTX_MUSIC;
-int musicTrack = 1;       // current position in MUSIC folder
-int totalMusicTracks = 1; // set at boot
+BrowseMode  browseMode  = BROWSE_MUSIC;
+int musicTrack = 1;         // current position in MUSIC folder
+int totalMusicTracks = 1;   // set at boot
+int rfidTrack = 1;          // current position in RFID folder
+int totalRfidTracks = 1;    // set at boot
 char lastRfidPath[32] = {}; // path of last played RFID card
+
+#define LONG_PRESS_MS 5000
+uint32_t playPressTime    = 0;
+bool     longPressHandled = false;
 int currentVolume = VOLUME_DEFAULT;
 bool seekUsed = false;
 AnimMode preProgramMode = ANIM_BREATHE;
@@ -151,6 +159,11 @@ void setup() {
   Serial.print("[Jukebox] MUSIC tracks: ");
   Serial.println(totalMusicTracks);
 
+  totalRfidTracks = playerQueryFolderCount(RFID_FOLDER);
+  if (totalRfidTracks == 0) totalRfidTracks = 1;
+  Serial.print("[Jukebox] RFID tracks: ");
+  Serial.println(totalRfidTracks);
+
   Serial.println("[Jukebox] Ready.");
 }
 
@@ -175,13 +188,26 @@ void loop() {
     }
   }
 
-  // ── Play / Stop — fires on release so holding for seek doesn't toggle ──
+  // ── Play / Stop ──
   int playEvent = pollButton(btnPlay);
   if (playEvent == 1) {
     seekUsed = false;
+    playPressTime = millis();
+    longPressHandled = false;
   }
+
+  // Long press: switch browse mode (suppresses the eventual release)
+  if (btnPlay.state == LOW && !longPressHandled && !seekUsed &&
+      millis() - playPressTime >= LONG_PRESS_MS) {
+    longPressHandled = true;
+    seekUsed = true;
+    browseMode = (browseMode == BROWSE_MUSIC) ? BROWSE_RFID : BROWSE_MUSIC;
+    Serial.println(browseMode == BROWSE_MUSIC ? "[MODE] MUSIC" : "[MODE] RFID");
+    startFlash(browseMode == BROWSE_MUSIC ? CRGB::Orange : CRGB::Purple);
+  }
+
   if (playEvent == -1 && seekUsed) {
-    animMode = prevMode; // return to wave/breathe after seek
+    animMode = prevMode;
   }
   if (playEvent == -1 && !seekUsed) {
     if (isPlaying) {
@@ -192,10 +218,17 @@ void loop() {
       animMode = ANIM_BREATHE;
       startFlash(CRGB::Red);
     } else {
-      Serial.print("[BTN] PLAY → Play MUSIC track ");
-      Serial.println(musicTrack);
-      playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
-      playContext = CTX_MUSIC;
+      if (browseMode == BROWSE_MUSIC) {
+        Serial.print("[BTN] PLAY → MUSIC track ");
+        Serial.println(musicTrack);
+        playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+        playContext = CTX_MUSIC;
+      } else {
+        Serial.print("[BTN] PLAY → RFID track ");
+        Serial.println(rfidTrack);
+        playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
+        playContext = CTX_RFID;
+      }
       isPlaying = true;
       animMode = ANIM_SPINNER;
       startFlash(CRGB::Green);
@@ -206,11 +239,17 @@ void loop() {
   int nextEvent = pollButton(btnNext);
   if (nextEvent == 1)  nextHeldWithPrev = (btnPrev.state == LOW);
   if (nextEvent == -1 && !nextHeldWithPrev) {
-    musicTrack = (musicTrack % totalMusicTracks) + 1;
-    Serial.print("[BTN] NEXT → MUSIC track ");
-    Serial.println(musicTrack);
-    playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
-    playContext = CTX_MUSIC;
+    if (browseMode == BROWSE_MUSIC) {
+      musicTrack = (musicTrack % totalMusicTracks) + 1;
+      Serial.print("[BTN] NEXT → MUSIC track "); Serial.println(musicTrack);
+      playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+      playContext = CTX_MUSIC;
+    } else {
+      rfidTrack = (rfidTrack % totalRfidTracks) + 1;
+      Serial.print("[BTN] NEXT → RFID track "); Serial.println(rfidTrack);
+      playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
+      playContext = CTX_RFID;
+    }
     isPlaying = true;
     startSweep(true, CRGB::Cyan);
     prevMode = ANIM_SPINNER;
@@ -220,11 +259,17 @@ void loop() {
   int prevEvent = pollButton(btnPrev);
   if (prevEvent == 1)  prevHeldWithNext = (btnNext.state == LOW);
   if (prevEvent == -1 && !prevHeldWithNext) {
-    musicTrack = (musicTrack - 2 + totalMusicTracks) % totalMusicTracks + 1;
-    Serial.print("[BTN] PREV → MUSIC track ");
-    Serial.println(musicTrack);
-    playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
-    playContext = CTX_MUSIC;
+    if (browseMode == BROWSE_MUSIC) {
+      musicTrack = (musicTrack - 2 + totalMusicTracks) % totalMusicTracks + 1;
+      Serial.print("[BTN] PREV → MUSIC track "); Serial.println(musicTrack);
+      playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+      playContext = CTX_MUSIC;
+    } else {
+      rfidTrack = (rfidTrack - 2 + totalRfidTracks) % totalRfidTracks + 1;
+      Serial.print("[BTN] PREV → RFID track "); Serial.println(rfidTrack);
+      playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
+      playContext = CTX_RFID;
+    }
     isPlaying = true;
     startSweep(false, CRGB::Yellow);
     prevMode = ANIM_SPINNER;
