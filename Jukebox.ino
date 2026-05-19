@@ -47,7 +47,7 @@
 #define NUM_LEDS 16
 #define PLAYER_BAUD 9600
 #define MUSIC_FOLDER "MUSIC"
-#define RFID_FOLDER  "RFID"
+#define RFID_FOLDER  "OTHER"
 #define DEBOUNCE_MS 50
 #define LED_BRIGHTNESS 90 // 0–255
 #define VOLUME_MAX     21  // ~70% of the 0-30 scale
