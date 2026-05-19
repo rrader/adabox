@@ -20,10 +20,8 @@ void playerNext() { playerCmd(0x06, 0, nullptr); }
 
 void playerVolume(uint8_t vol) { playerCmd(0x13, 1, &vol); }
 
-// Play /FOLDER/00001.mp3 etc. using path-based command 0x08.
-void playerPlayPath(const char *folder, int track) {
-  char path[32];
-  snprintf(path, sizeof(path), "/%s/%05d.mp3", folder, track);
+// Play a file by full path, e.g. "/MUSIC/00003.mp3" (command 0x08).
+void playerPlayPath(const char *path) {
   uint8_t pathLen = strlen(path);
   uint8_t cmdLen = 1 + pathLen; // device byte + path
   uint8_t crc = 0xAA + 0x08 + cmdLen + 0x01;
@@ -38,10 +36,17 @@ void playerPlayPath(const char *folder, int track) {
   Serial2.write(crc);
 }
 
+// Build path from folder + track number and play.
+void playerPlayFolderTrack(const char *folder, int track) {
+  char path[32];
+  snprintf(path, sizeof(path), "/%s/%05d.mp3", folder, track);
+  playerPlayPath(path);
+}
+
 // Navigate to a folder and return its track count via command 0x12.
 // Called only from setup() — uses delay() which is fine there.
 uint16_t playerQueryFolderCount(const char *folder) {
-  playerPlayPath(folder, 1);
+  playerPlayFolderTrack(folder, 1);
   delay(300); // let module process path and set folder context
   playerStop();
   delay(100);

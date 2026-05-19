@@ -67,8 +67,7 @@ bool isPlaying = false;
 PlayContext playContext = CTX_MUSIC;
 int musicTrack = 1;       // current position in MUSIC folder
 int totalMusicTracks = 1; // set at boot
-int totalRfidTracks = 1;  // set at boot
-int lastRfidTrack = 0;    // track id of last played RFID card
+char lastRfidPath[32] = {}; // path of last played RFID card
 int currentVolume = VOLUME_DEFAULT;
 bool seekUsed = false;
 AnimMode preProgramMode = ANIM_BREATHE;
@@ -121,7 +120,7 @@ void checkTrackEnd() {
       musicTrack = (musicTrack % totalMusicTracks) + 1;
       Serial.print("[BUSY] Track ended → auto-advance to MUSIC track ");
       Serial.println(musicTrack);
-      playerPlayPath(MUSIC_FOLDER, musicTrack);
+      playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
       isPlaying = true;
       animMode = ANIM_SPINNER;
     }
@@ -151,11 +150,6 @@ void setup() {
   if (totalMusicTracks == 0) totalMusicTracks = 1;
   Serial.print("[Jukebox] MUSIC tracks: ");
   Serial.println(totalMusicTracks);
-
-  totalRfidTracks = playerQueryFolderCount(RFID_FOLDER);
-  if (totalRfidTracks == 0) totalRfidTracks = 1;
-  Serial.print("[Jukebox] RFID tracks: ");
-  Serial.println(totalRfidTracks);
 
   Serial.println("[Jukebox] Ready.");
 }
@@ -200,7 +194,7 @@ void loop() {
     } else {
       Serial.print("[BTN] PLAY → Play MUSIC track ");
       Serial.println(musicTrack);
-      playerPlayPath(MUSIC_FOLDER, musicTrack);
+      playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
       playContext = CTX_MUSIC;
       isPlaying = true;
       animMode = ANIM_SPINNER;
@@ -215,7 +209,7 @@ void loop() {
     musicTrack = (musicTrack % totalMusicTracks) + 1;
     Serial.print("[BTN] NEXT → MUSIC track ");
     Serial.println(musicTrack);
-    playerPlayPath(MUSIC_FOLDER, musicTrack);
+    playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
     playContext = CTX_MUSIC;
     isPlaying = true;
     startSweep(true, CRGB::Cyan);
@@ -229,7 +223,7 @@ void loop() {
     musicTrack = (musicTrack - 2 + totalMusicTracks) % totalMusicTracks + 1;
     Serial.print("[BTN] PREV → MUSIC track ");
     Serial.println(musicTrack);
-    playerPlayPath(MUSIC_FOLDER, musicTrack);
+    playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
     playContext = CTX_MUSIC;
     isPlaying = true;
     startSweep(false, CRGB::Yellow);
@@ -247,28 +241,31 @@ void loop() {
 
   // ── RFID ──
   if (btnNext.state == LOW && btnPrev.state == LOW) {
-    if (rfidWrite(musicTrack)) {
-      Serial.print("[RFID] Wrote MUSIC track ");
-      Serial.println(musicTrack);
+    char path[32];
+    snprintf(path, sizeof(path), "/%s/%05d.mp3", MUSIC_FOLDER, musicTrack);
+    if (rfidWritePath(path)) {
+      Serial.print("[RFID] Wrote path ");
+      Serial.println(path);
       startFlash(CRGB::Green);
     }
   } else {
-    int rfidTrack = rfidRead();
-    if (rfidTrack > 0 && rfidTrack <= totalRfidTracks) {
-      if (isPlaying && playContext == CTX_RFID && rfidTrack == lastRfidTrack) {
+    char rfidPath[32];
+    int result = rfidReadPath(rfidPath, sizeof(rfidPath));
+    if (result == 1) {
+      if (isPlaying && playContext == CTX_RFID && strcmp(rfidPath, lastRfidPath) == 0) {
         Serial.println("[RFID] Already playing this track, ignoring");
       } else {
-        lastRfidTrack = rfidTrack;
+        strncpy(lastRfidPath, rfidPath, sizeof(lastRfidPath));
         playContext = CTX_RFID;
-        Serial.print("[RFID] Playing RFID track ");
-        Serial.println(rfidTrack);
-        playerPlayPath(RFID_FOLDER, rfidTrack);
+        Serial.print("[RFID] Playing ");
+        Serial.println(rfidPath);
+        playerPlayPath(rfidPath);
         isPlaying = true;
         animMode = ANIM_SPINNER;
         startFlash(CRGB::Magenta);
       }
-    } else if (rfidTrack == -1) {
-      Serial.println("[RFID] Card has no track written");
+    } else if (result == -1) {
+      Serial.println("[RFID] Card has no path written");
       startFlash(CRGB::Red);
     }
   }

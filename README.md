@@ -45,16 +45,14 @@ Format the card as FAT32 (single partition, MBR). Use two folders:
 
 ```
 MUSIC/
-  00001.mp3    ← browsed with Next/Prev buttons
-  00002.mp3
-  ...
-RFID/
-  00001.mp3    ← played by RFID cards; IDs are stable, never reorder
+  00001.mp3
   00002.mp3
   ...
 ```
 
-Five-digit zero-padded filenames are required. Track counts are auto-detected at boot.
+Five-digit zero-padded filenames required in `MUSIC/`. Track count is auto-detected at boot.
+
+RFID cards store the **full file path** (e.g. `/MUSIC/00003.mp3`), not a track number. To program a card: navigate to the desired track with Next/Prev, then hold Next+Prev and tap the card.
 
 ## LED ring behavior
 
