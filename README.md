@@ -1,6 +1,6 @@
 # Jukebox
 
-ESP32-based MP3 jukebox using the DY-SV5W audio module and a 16-LED WS2812 ring.
+My own take on the [ESPuino](https://github.com/biologist79/ESPuino) / [Tonuino](https://www.tonuino.de) / Toniebox concept — an RFID-controlled music box where you tap a card to play music. Built on ESP32 with a DY-SV5W audio module and a 16-LED WS2812 ring, kept deliberately simple: no WiFi, no app, no cloud — just cards and buttons.
 
 ## Hardware
 
