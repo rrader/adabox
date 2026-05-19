@@ -41,16 +41,20 @@ Buttons use the internal pull-up — no external resistors needed.
 
 ## SD Card preparation
 
-Format the card as FAT32 (single partition, MBR). Place MP3 files in the root named with five digits:
+Format the card as FAT32 (single partition, MBR). Use two folders:
 
 ```
-00001.mp3
-00002.mp3
-...
-00024.mp3
+MUSIC/
+  00001.mp3    ← browsed with Next/Prev buttons
+  00002.mp3
+  ...
+RFID/
+  00001.mp3    ← played by RFID cards; IDs are stable, never reorder
+  00002.mp3
+  ...
 ```
 
-No subfolders. The DY-SV5W requires exactly this naming for UART track-select commands.
+Five-digit zero-padded filenames are required. Track counts are auto-detected at boot.
 
 ## LED ring behavior
 
