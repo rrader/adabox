@@ -58,7 +58,7 @@ Five-digit zero-padded filenames required. Track counts are auto-detected at boo
 
 RFID cards store the **full file path** (e.g. `/MUSIC/00003.mp3`), not a track number. To program a card: navigate to the desired track with Next/Prev, then hold Next+Prev and tap the card.
 
-Hold Play for 5 seconds to toggle between MUSIC and OTHER browse modes (orange flash = MUSIC, purple flash = OTHER).
+While stopped, hold Next for 5 seconds to toggle between MUSIC and OTHER browse modes (orange flash = MUSIC, purple flash = OTHER).
 
 ## LED ring behavior
 
@@ -78,7 +78,7 @@ Hold Play for 5 seconds to toggle between MUSIC and OTHER browse modes (orange f
 |---|---|
 | **FastLED** ≥ 3.6 | Arduino Library Manager |
 
-No library needed for the DY-SV5W — it speaks raw UART at 9600 baud, handled directly by the ESP32's `HardwareSerial` (`Serial2`).
+No library needed for the DY-SV5W — it speaks raw UART at 9600 baud, handled directly by the ESP32's `HardwareSerial` (`Serial2`). For the UART protocol details (especially the quirky path encoding for command `0x08`, where `/MUSIC/00001.mp3` must be sent as `/MUSIC*/00001*MP3`), the [SnijderC/dyplayer](https://github.com/SnijderC/dyplayer) library is a useful reference implementation.
 
 ## Arduino IDE setup
 

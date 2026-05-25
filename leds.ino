@@ -6,8 +6,10 @@ uint32_t lastLedMs = 0;
 uint8_t breathVal = 5;
 int8_t breathDir = 1;
 
-// Color wave state
+// Spinner state (randomized per playback)
 uint8_t waveHue = 0;
+bool spinnerCW = true;
+uint8_t spinnerHueBase = 0;
 
 // Sweep state
 uint8_t sweepPos = 0;
@@ -21,11 +23,51 @@ CRGB flashColor;
 // Program mode state
 uint8_t programPos = 0;
 
+// Program-success state
+uint8_t progSuccessStep = 0;
+
 void ledSetup() {
   FastLED.addLeds<WS2812, PIN_LED, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(LED_BRIGHTNESS);
   fill_solid(leds, NUM_LEDS, CRGB::Black);
   FastLED.show();
+}
+
+// Pick direction and base color for the next spinner run, deterministically
+// from `seed` so the same track always looks the same.
+// Music: any starting offset on the rainbow.
+// RFID:  a jewel-tone hue (green→cyan→blue→purple→pink→magenta).
+void randomizeSpinner(uint32_t seed) {
+  spinnerCW = (seed & 1) == 0;
+  if (playContext == CTX_MUSIC) {
+    // Curated bright/saturated hues — warm + cool, but never "all colors at once".
+    static const uint8_t palette[] = {
+       0,   // red
+      20,   // orange
+      40,   // amber
+      64,   // yellow-green
+      96,   // green
+     128,   // cyan
+     160,   // sky blue
+     192,   // purple
+     220,   // pink
+     240,   // magenta
+    };
+    spinnerHueBase = palette[(seed >> 1) % sizeof(palette)];
+  } else {
+    static const uint8_t palette[] = {96, 128, 160, 192, 220, 240};
+    spinnerHueBase = palette[(seed >> 1) % sizeof(palette)];
+  }
+  waveHue = 0;
+  lastLedMs = 0;
+  Serial.print("[SPIN] ctx=");
+  Serial.print(playContext == CTX_MUSIC ? "MUSIC" : "RFID");
+  Serial.print(" seed=");
+  Serial.print(seed);
+  Serial.print(" dir=");
+  Serial.print(spinnerCW ? "CW" : "CCW");
+  Serial.print(" hue=");
+  Serial.println(spinnerHueBase);
 }
 
 // Advance the seek comet one step per encoder tick.
@@ -57,6 +99,12 @@ void startFlash(CRGB color) {
   lastLedMs = 0; // render first frame immediately
 }
 
+void startProgramSuccess() {
+  animMode = ANIM_PROGRAM_SUCCESS;
+  progSuccessStep = 0;
+  lastLedMs = 0;
+}
+
 void startSweep(bool cw, CRGB color) {
   prevMode = (animMode == ANIM_SPINNER || animMode == ANIM_BREATHE) ? animMode
                                                                     : prevMode;
@@ -81,19 +129,29 @@ void updateLEDs() {
       breathDir = -1;
     if (breathVal <= 5)
       breathDir = 1;
-    fill_solid(leds, NUM_LEDS, CHSV(160, 220, breathVal)); // blue
+    fill_solid(leds, NUM_LEDS, CHSV(96, 220, breathVal)); // green idle
     FastLED.show();
     break;
 
-  case ANIM_SPINNER:
-    if (now - lastLedMs < 30)
+  case ANIM_SPINNER: {
+    // Full-ring two-tone gradient rotating smoothly around the ring.
+    // A cos wave modulates hue ±amp around spinnerHueBase, so the ring shows
+    // a narrow band of related colours (never the full rainbow) and the
+    // pattern wraps seamlessly.
+    if (now - lastLedMs < (playContext == CTX_MUSIC ? 35 : 50))
       break;
     lastLedMs = now;
-    for (int i = 0; i < NUM_LEDS; i++)
-      leds[i] = CHSV(waveHue + i * (256 / NUM_LEDS), 240, 255);
+    int8_t  dir = spinnerCW ? 1 : -1;
+    uint8_t amp = (playContext == CTX_MUSIC ? 88 : 56);
+    for (int i = 0; i < NUM_LEDS; i++) {
+      uint8_t angle  = (uint8_t)(i * (256 / NUM_LEDS) + (int)waveHue * dir);
+      int16_t offset = ((int16_t)cos8(angle) - 128) * amp / 128;
+      leds[i] = CHSV(spinnerHueBase + offset, 230, 255);
+    }
     waveHue += 2;
     FastLED.show();
     break;
+  }
 
   case ANIM_SWEEP_CW:
   case ANIM_SWEEP_CCW:
@@ -133,6 +191,23 @@ void updateLEDs() {
     }
     programPos = (programPos + 1) % NUM_LEDS;
     FastLED.show();
+    break;
+
+  case ANIM_PROGRAM_SUCCESS:
+    if (now - lastLedMs < 35)
+      break;
+    lastLedMs = now;
+    if (progSuccessStep < NUM_LEDS) {
+      // Sweep green progressively around the ring CW.
+      for (int i = 0; i < NUM_LEDS; i++)
+        leds[i] = (i <= progSuccessStep) ? CRGB::Green : CRGB::Black;
+    } else {
+      // Hold full green.
+      fill_solid(leds, NUM_LEDS, CRGB::Green);
+    }
+    FastLED.show();
+    if (++progSuccessStep >= NUM_LEDS + 10)
+      animMode = prevMode;
     break;
 
   case ANIM_FLASH:
