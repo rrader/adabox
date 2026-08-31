@@ -172,7 +172,6 @@ void setup() {
 
   ledSetup();
   encoderSetup();
-  rfidSetup();
 
   delay(800); // let DY-SV5W boot
   playerVolume(currentVolume);
@@ -186,6 +185,8 @@ void setup() {
   if (totalRfidTracks == 0) totalRfidTracks = 1;
   Serial.print("[Jukebox] RFID tracks: ");
   Serial.println(totalRfidTracks);
+
+  rfidSetup();
 
   Serial.println("[Jukebox] Ready.");
 }

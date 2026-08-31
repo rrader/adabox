@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jukebox SD Manager</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+  <style>
+    :root {
+      --bg:       #12121e;
+      --surface:  #1c1c2e;
+      --card:     #252540;
+      --accent:   #e0457a;
+      --accent2:  #7c5cbf;
+      --text:     #e8e8f0;
+      --muted:    #7878a0;
+      --green:    #3dba6e;
+      --border:   #30304a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px; height: 100vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 18px; display: flex; align-items: center; gap: 12px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 15px; font-weight: 600; flex: 1; }
+    header h1 span { color: var(--accent); }
+    .sd-status {
+      font-size: 12px; color: var(--muted);
+      background: var(--card); padding: 4px 10px; border-radius: 20px;
+    }
+    .sd-status.open { color: var(--green); }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 6px 13px; border-radius: 6px; border: none;
+      cursor: pointer; font-size: 12px; font-weight: 500;
+      transition: filter 0.15s; white-space: nowrap;
+    }
+    .btn:hover { filter: brightness(1.15); }
+    .btn:active { filter: brightness(0.9); }
+    .btn-primary  { background: var(--accent);  color: #fff; }
+    .btn-dim      { background: var(--card);    color: var(--text); border: 1px solid var(--border); }
+    .btn-green    { background: var(--green);   color: #fff; }
+    .btn-danger   { background: #7a3030; color: #ffc0c0; }
+    .btn-sm       { padding: 3px 9px; font-size: 11px; }
+
+    /* ── Main layout ── */
+    main { display: flex; flex: 1; overflow: hidden; gap: 0; }
+    .divider { width: 1px; background: var(--border); flex-shrink: 0; }
+
+    /* ── SD panel ── */
+    .panel-sd {
+      width: 230px; flex-shrink: 0; overflow-y: auto;
+      padding: 14px; background: var(--surface);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .panel-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+    }
+    .folder-header {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 600; margin-bottom: 5px;
+    }
+    .folder-header .badge {
+      background: var(--card); color: var(--muted);
+      font-size: 10px; padding: 1px 6px; border-radius: 10px;
+    }
+    .track-row {
+      padding: 4px 6px; border-radius: 4px;
+      transition: background 0.1s; line-height: 1.3;
+      display: flex; align-items: flex-start; gap: 4px;
+    }
+    .track-row:hover { background: var(--card); }
+    .track-row .tr-body { flex: 1; min-width: 0; }
+    .track-row .tr-num  {
+      font-size: 11px; color: var(--text); font-family: monospace;
+      display: flex; align-items: center; gap: 6px; opacity: 0.55;
+    }
+    .track-row .tr-size { font-size: 9px; }
+    /* When there's a display name, number row shrinks to a label above it */
+    .track-row.has-name .tr-num { font-size: 10px; opacity: 0.4; margin-bottom: 1px; }
+    .track-row.has-name .tr-name { font-size: 12px; }
+    .track-row .tr-name { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track-row .tr-del, .track-row .tr-play, .track-row .tr-edit {
+      display: none; background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 12px; padding: 1px 3px; flex-shrink: 0;
+      line-height: 1;
+    }
+    .track-row:hover .tr-del  { display: block; }
+    .track-row:hover .tr-play { display: block; }
+    .track-row:hover .tr-edit { display: block; }
+    .track-row .tr-del:hover  { color: var(--accent); }
+    .track-row .tr-play:hover { color: var(--green); }
+    .track-row .tr-edit:hover { color: var(--accent2); }
+    /* always show edit btn when this row is being edited */
+    .track-row.tr-editing .tr-edit { display: block; color: var(--accent2); }
+    /* always show play btn when this row is loading or playing */
+    .track-row.tr-loading .tr-play,
+    .track-row.tr-playing  .tr-play { display: block; }
+    .track-row.tr-loading .tr-play { color: var(--muted); animation: spin 1s linear infinite; cursor: default; }
+    .track-row.tr-playing  .tr-play { color: var(--green); }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* playback progress underline */
+    .track-row .tr-playbar {
+      height: 2px; background: var(--border); border-radius: 1px;
+      margin-top: 3px; display: none; overflow: hidden;
+    }
+    .track-row.tr-playing .tr-playbar { display: block; }
+    .track-row .tr-playbar-fill {
+      height: 100%; background: var(--green); border-radius: 1px;
+      transition: width 0.25s linear; width: 0%;
+    }
+    .track-row.stub .tr-num  { color: #555; }
+    .track-row.stub .tr-name { color: #555; font-style: italic; }
+    .track-row .tr-name { cursor: text; }
+    .tr-rename-input {
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--accent); border-radius: 3px;
+      font-size: 11px; padding: 1px 5px; width: 100%;
+      outline: none; font-family: inherit;
+    }
+    .empty-hint {
+      color: var(--muted); font-size: 11px; padding: 4px 6px; font-style: italic;
+    }
+    .sd-placeholder {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 8px; color: var(--muted); text-align: center;
+    }
+    .sd-placeholder .icon { font-size: 36px; }
+
+    /* ── Queue panel ── */
+    .panel-queue {
+      flex: 1; overflow-y: auto; padding: 14px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    /* ── Drop zone ── */
+    .drop-zone {
+      border: 2px dashed var(--border); border-radius: 10px;
+      padding: 22px 16px; text-align: center; color: var(--muted);
+      cursor: pointer; transition: border-color 0.2s, background 0.2s;
+      flex-shrink: 0;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent); background: rgba(224,69,122,0.07);
+      color: var(--text);
+    }
+    .drop-zone .dz-icon { font-size: 26px; margin-bottom: 6px; }
+    .drop-zone label { color: var(--accent); text-decoration: underline; cursor: pointer; }
+    input#fileInput { display: none; }
+
+    /* ── Queue items ── */
+    .queue-empty {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-style: italic;
+    }
+    .queue-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 6px; border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .queue-footer .count { color: var(--muted); font-size: 12px; }
+
+    .qi {
+      background: var(--card); border-radius: 8px;
+      padding: 10px 12px; display: flex; align-items: center;
+      gap: 10px; border: 1px solid var(--border);
+      transition: border-color 0.2s;
+    }
+    .qi.saved { border-color: var(--green); opacity: 0.7; }
+    .qi .qi-info { flex: 1; min-width: 0; }
+    .qi .qi-name {
+      font-size: 13px; font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .qi .qi-meta {
+      display: flex; align-items: center; gap: 8px; margin-top: 3px;
+    }
+    .qi .qi-dest { font-size: 11px; color: var(--muted); font-family: monospace; }
+    .qi .qi-trim { font-size: 11px; color: var(--accent2); }
+    .qi .qi-ok   { font-size: 11px; color: var(--green); }
+    .qi-actions  { display: flex; gap: 6px; flex-shrink: 0; }
+    .prog-bar { height: 2px; background: var(--border); border-radius: 2px; margin-top: 5px; display: none; }
+    .prog-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.1s; }
+
+    select.folder-sel {
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border); border-radius: 5px;
+      padding: 3px 6px; font-size: 11px; cursor: pointer;
+    }
+
+    /* ── Trim modal ── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 22px; width: 680px;
+      max-width: calc(100vw - 32px); max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+    .modal-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+
+    /* Waveform */
+    .wave-wrap {
+      position: relative; height: 72px; background: #0d0d1a;
+      border-radius: 6px; overflow: hidden; margin-bottom: 14px;
+    }
+    #waveCanvas { display: block; width: 100%; height: 100%; }
+    .wave-sel {
+      position: absolute; top: 0; height: 100%;
+      background: rgba(224,69,122,0.18);
+      border-left: 2px solid var(--accent);
+      border-right: 2px solid var(--accent);
+      pointer-events: none;
+    }
+    .wave-playhead {
+      position: absolute; top: 0; height: 100%; width: 2px;
+      background: rgba(255,255,255,0.5); pointer-events: none;
+      display: none;
+    }
+
+    /* Sliders */
+    .trim-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px;
+    }
+    .trim-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; }
+    .trim-group input[type=range] { width: 100%; accent-color: var(--accent); }
+    .trim-group .tval { font-size: 13px; font-weight: 600; margin-top: 3px; }
+    .trim-info {
+      text-align: center; color: var(--muted); font-size: 12px;
+      margin-bottom: 14px;
+    }
+    .trim-info strong { color: var(--text); }
+
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* SD operation progress */
+    .sd-op-bar {
+      display: none; margin-bottom: 8px;
+    }
+    .sd-op-bar.active { display: block; }
+    .sd-op-label {
+      font-size: 11px; color: var(--muted); margin-bottom: 4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sd-op-track {
+      height: 4px; background: var(--border); border-radius: 2px; overflow: hidden;
+    }
+    .sd-op-fill {
+      height: 100%; background: var(--accent); border-radius: 2px;
+      transition: width 0.15s ease; width: 0%;
+    }
+    .sd-op-fill.indeterminate {
+      width: 40% !important;
+      animation: indeterminate 1.2s ease-in-out infinite;
+    }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+
+    /* SD panel header */
+    .sd-panel-top {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .sd-panel-top .panel-label { margin-bottom: 0; }
+    .del-mode-bar {
+      display: none; background: rgba(224,69,122,0.1); border: 1px solid var(--accent);
+      border-radius: 6px; padding: 6px 10px; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .del-mode-bar.hidden { display: none; }
+    .del-mode-bar span { flex: 1; font-size: 12px; color: var(--muted); }
+
+    /* Checkboxes in track rows */
+    .tr-cb {
+      width: 14px; height: 14px; flex-shrink: 0; cursor: pointer;
+      accent-color: var(--accent); display: none; margin-top: 2px;
+    }
+    .del-mode .tr-cb { display: block; }
+    .del-mode .tr-del { display: none !important; }
+    .track-row.selected { background: rgba(224,69,122,0.12); }
+    .stub-badge {
+      display: inline-block; font-size: 9px; background: var(--surface2);
+      color: var(--muted); padding: 0 4px; border-radius: 3px;
+      vertical-align: middle; margin-left: 3px;
+    }
+    .tr-size { font-size: 9px; color: var(--muted); margin-left: 4px; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: var(--green); color: #fff; padding: 8px 18px;
+      border-radius: 20px; font-size: 13px; font-weight: 500;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 300;
+    }
+    #toast.show { opacity: 1; }
+
+    /* Renumber warning modal */
+    .warn-list {
+      background: var(--bg); border-radius: 6px; padding: 10px;
+      margin: 10px 0; max-height: 200px; overflow-y: auto;
+      font-size: 12px; font-family: monospace; line-height: 1.6;
+    }
+    .warn-list .del-entry  { color: var(--accent); }
+    .warn-list .ren-entry  { color: var(--muted); }
+    .warn-list .rfid-warn  { color: #e8a040; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🎵 Jukebox <span>SD Manager</span></h1>
+  <div class="sd-status" id="sdStatus">No SD card open</div>
+  <button class="btn btn-dim" id="btnOpen">📂 Open SD card</button>
+</header>
+
+<main>
+  <!-- Left: SD card contents -->
+  <div class="panel-sd" id="sdPanel">
+    <div class="sd-placeholder" id="sdPlaceholder">
+      <div class="icon">💾</div>
+      <div>Open your SD card folder<br>to browse its contents</div>
+    </div>
+    <div id="sdContents" style="display:none">
+      <div class="sd-panel-top">
+        <div class="panel-label">SD card contents</div>
+        <button class="btn btn-dim btn-sm" id="btnDelMode" onclick="toggleDelMode()">☑ Select</button>
+      </div>
+      <div class="sd-op-bar" id="sdOpBar">
+        <div class="sd-op-label" id="sdOpLabel"></div>
+        <div class="sd-op-track"><div class="sd-op-fill" id="sdOpFill"></div></div>
+      </div>
+      <div class="del-mode-bar hidden" id="delModeBar">
+        <span id="selCount">0 selected</span>
+        <button class="btn btn-dim btn-sm" onclick="selectAll()">All</button>
+        <button class="btn btn-danger btn-sm" id="btnDeleteSel" onclick="confirmDelete()" disabled>🗑 Delete</button>
+        <button class="btn btn-dim btn-sm" onclick="toggleDelMode()">✕</button>
+      </div>
+      <div id="sdTrackList"></div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Right: upload queue -->
+  <div class="panel-queue">
+    <div class="drop-zone" id="dropZone">
+      <div class="dz-icon">🎵</div>
+      <div>Drop MP3 files here, or <label for="fileInput">browse</label></div>
+      <div style="font-size:11px;margin-top:3px">Multiple files OK</div>
+      <input type="file" id="fileInput" accept=".mp3,audio/mpeg" multiple>
+    </div>
+
+    <div id="queueList"></div>
+    <div class="queue-empty" id="queueEmpty">Add some MP3s to get started</div>
+
+    <div class="queue-footer" id="queueFooter" style="display:none">
+      <span class="count" id="queueCount"></span>
+      <button class="btn btn-green" id="btnSaveAll">💾 Save all to SD card</button>
+    </div>
+  </div>
+</main>
+
+<!-- Trim modal -->
+<div class="overlay" id="trimOverlay">
+  <div class="modal">
+    <div class="modal-title" id="trimTitle">✂️ Trim audio</div>
+
+    <div class="wave-wrap">
+      <canvas id="waveCanvas"></canvas>
+      <div class="wave-sel" id="waveSel"></div>
+      <div class="wave-playhead" id="wavePlayhead"></div>
+    </div>
+
+    <div class="trim-grid">
+      <div class="trim-group">
+        <label>Remove from start</label>
+        <input type="range" id="slStart" min="0" step="0.1" value="0">
+        <div class="tval" id="valStart">0.0 s</div>
+      </div>
+      <div class="trim-group">
+        <label>Remove from end</label>
+        <input type="range" id="slEnd" min="0" step="0.1" value="0">
+        <div class="tval" id="valEnd">0.0 s</div>
+      </div>
+    </div>
+
+    <div class="trim-info">
+      Trimmed duration: <strong id="trimDuration">–</strong>
+      &nbsp;·&nbsp; Original: <strong id="trimOriginal">–</strong>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-dim" id="btnPreview">▶ Preview</button>
+      <button class="btn btn-dim" id="btnTrimReset">Reset</button>
+      <button class="btn btn-dim" id="btnTrimCancel">Cancel</button>
+      <button class="btn btn-primary" id="btnTrimApply">✓ Apply trim</button>
+      <button class="btn btn-green" id="btnTrimSave" style="display:none">💾 Save to card</button>
+    </div>
+  </div>
+</div>
+
+<!-- Renumber warning modal -->
+<div class="overlay" id="warnOverlay">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-title">⚠️ Permanently delete &amp; renumber tracks</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:8px" id="warnIntro"></p>
+    <div class="warn-list" id="warnList"></div>
+    <p id="warnRfid" style="color:#e8a040;font-size:12px;margin-bottom:14px;display:none">
+      ⚠ RFID cards programmed to renumbered paths will play different songs.
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-dim" onclick="document.getElementById('warnOverlay').classList.remove('open')">Cancel</button>
+      <button class="btn btn-danger" id="btnConfirmDelete">🗑 Delete &amp; renumber</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ──────────────────────────────────────────────────────────────────────────────
+// State
+// ──────────────────────────────────────────────────────────────────────────────
+let sdRoot     = null;
+let sdMusic    = [];      // [{name, size}] sorted by name
+let sdOther    = [];
+let sdMusicDir = null;    // FileSystemDirectoryHandle
+let sdOtherDir = null;
+// macOS resource-fork junk files (._*) — {folder:'MUSIC'|'OTHER', name, dir}
+let sdJunk     = [];
+let tracklist  = {};      // { 'MUSIC/00001.mp3': 'Original Song.mp3', ... }
+let queue      = [];      // { id, file, folder, trimStart, trimEnd, buf, status, savedNum }
+let nextId     = 1;
+let trimItem   = null;
+let previewSrc  = null;
+let playheadRaf = null;
+let playheadStart = 0;
+let sdDelMode   = false;
+let sdSelected  = new Set();   // 'MUSIC/00003.mp3'
+let pendingDeleteFolder = null;
+let pendingDeleteKeys   = null;
+let playingKey  = null;        // key of currently playing track
+let playingSrc  = null;        // AudioBufferSourceNode
+let playingRaf  = null;        // requestAnimationFrame handle
+let playingStart = 0;          // audioCtx.currentTime when playback started
+let playingDur   = 0;          // total duration of playing track
+let loadingKey  = null;        // key of track currently being loaded
+let queuePlayingId  = null;   // id of queue item currently playing
+let queuePlayingSrc = null;   // AudioBufferSourceNode for queue playback
+let trimMode    = 'queue';     // 'queue' | 'sd'
+let trimSDKey   = null;        // key of SD track being edited
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const STUB_THRESHOLD = 2000; // bytes — files smaller than this are stubs
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SD card — open, scan, tracklist
+// ──────────────────────────────────────────────────────────────────────────────
+document.getElementById('btnOpen').addEventListener('click', openSD);
+
+async function openSD() {
+  try {
+    sdRoot = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await refreshSD();
+    document.getElementById('sdStatus').textContent = sdRoot.name;
+    document.getElementById('sdStatus').classList.add('open');
+    renderQueue();
+  } catch(e) {
+    if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message);
+  }
+}
+
+async function refreshSD() {
+  sdOp('Scanning SD card…', null);
+  sdMusic = []; sdOther = []; sdJunk = [];
+  sdMusicDir = null; sdOtherDir = null;
+  for await (const [name, h] of sdRoot.entries()) {
+    if (h.kind !== 'directory') continue;
+    const up = name.toUpperCase();
+    if (up === 'MUSIC') {
+      sdMusicDir = h;
+      for await (const [fname, fh] of h.entries()) {
+        if (isJunk(fname))       { sdJunk.push({ folder: 'MUSIC', name: fname, dir: h }); }
+        else if (isMP3(fname))   { const file = await fh.getFile(); sdMusic.push({ name: fname, size: file.size }); }
+      }
+    }
+    if (up === 'OTHER') {
+      sdOtherDir = h;
+      for await (const [fname, fh] of h.entries()) {
+        if (isJunk(fname))       { sdJunk.push({ folder: 'OTHER', name: fname, dir: h }); }
+        else if (isMP3(fname))   { const file = await fh.getFile(); sdOther.push({ name: fname, size: file.size }); }
+      }
+    }
+  }
+  sdMusic.sort((a,b) => a.name.localeCompare(b.name));
+  sdOther.sort((a,b) => a.name.localeCompare(b.name));
+  sdOp('Reading tracklist…', null);
+  await readTracklist();
+  sdOp('', -1);
+  renderSD();
+}
+
+function isMP3(name)  { return name.toLowerCase().endsWith('.mp3') && !name.startsWith('._'); }
+function isJunk(name) { return name.startsWith('._'); }
+
+// ── tracklist.txt ─────────────────────────────────────────────────────────────
+// Format (one per line): "MUSIC/00001.mp3 = Original Song.mp3"
+
+async function readTracklist() {
+  tracklist = {};
+  try {
+    const fh   = await sdRoot.getFileHandle('tracklist.txt');
+    const file = await fh.getFile();
+    const text = await file.text();
+    for (const line of text.split('\n')) {
+      const m = line.match(/^(.+?\.mp3)\s*=\s*(.+)$/i);
+      if (m) tracklist[m[1].trim()] = m[2].trim();
+    }
+  } catch(e) { /* doesn't exist yet — created on first save */ }
+}
+
+async function writeTracklist() {
+  const lines = Object.entries(tracklist)
+    .sort(([a],[b]) => a.localeCompare(b))
+    .map(([k,v]) => `${k} = ${v}`);
+  const fh = await sdRoot.getFileHandle('tracklist.txt', { create: true });
+  const w  = await fh.createWritable();
+  await w.write(lines.join('\n') + '\n');
+  await w.close();
+}
+
+// ── Safe next track number ────────────────────────────────────────────────────
+// Uses max(files on card, tracklist entries) + 1
+// → deleted slots are never reused; RFID cards stay pointing at nothing rather
+//   than the wrong song.
+
+function safeNextNum(folder) {
+  const files  = folder === 'MUSIC' ? sdMusic : sdOther;
+  const prefix = folder + '/';
+  const maxF   = files.reduce((m, f) => { const n = parseInt(f.name); return isNaN(n)?m:Math.max(m,n); }, 0);
+  const maxTl  = Object.keys(tracklist)
+    .filter(k => k.startsWith(prefix))
+    .reduce((m, k) => { const n = parseInt(k.replace(prefix,'')); return isNaN(n)?m:Math.max(m,n); }, 0);
+  return Math.max(maxF, maxTl) + 1;
+}
+
+// ── SD panel rendering ────────────────────────────────────────────────────────
+
+function renderSD() {
+  document.getElementById('sdPlaceholder').style.display = 'none';
+  document.getElementById('sdContents').style.display   = 'block';
+
+  const musicNames = new Set(sdMusic.map(f => 'MUSIC/' + f.name));
+  const otherNames = new Set(sdOther.map(f => 'OTHER/' + f.name));
+
+  const orphMusic = Object.keys(tracklist).filter(k => k.startsWith('MUSIC/') && !musicNames.has(k)).sort();
+  const orphOther = Object.keys(tracklist).filter(k => k.startsWith('OTHER/') && !otherNames.has(k)).sort();
+
+  const delCls = sdDelMode ? ' del-mode' : '';
+
+  function makeRow(key, fname, name, size, isOrphan) {
+    const isStub = !isOrphan && size < STUB_THRESHOLD;
+    const sel    = sdSelected.has(key);
+    const sizeStr = isOrphan ? '' : `<span class="tr-size">${fmtSize(size)}</span>`;
+    const numStyle = isOrphan ? 'text-decoration:line-through;' : '';
+    const nameHtml = isOrphan
+      ? `<div class="tr-name" style="color:var(--accent)">⚠ deleted — ${escHtml(name)}</div>`
+      : `<div class="tr-name" id="tn-${key.replace('/','_')}"
+             onclick="event.stopPropagation();startRename('${key}')"
+             title="Click to rename">${
+           name ? escHtml(name) + (isStub ? ' <span class="stub-badge">stub</span>' : '') : '<span style="color:var(--muted);font-style:italic">click to name…</span>'
+         }</div>`;
+
+    const isLoading = loadingKey === key;
+    const isPlaying = playingKey === key;
+    const playBtnIcon = isLoading ? '⟳' : isPlaying ? '⏹' : '▶';
+    const playBtnTitle = isLoading ? 'Loading…' : isPlaying ? 'Stop' : 'Play';
+    const extraCls = (isLoading ? ' tr-loading' : '') + (isPlaying ? ' tr-playing' : '')
+                   + (!isOrphan && name ? ' has-name' : '');
+
+    return `<div class="track-row${isOrphan?' orphan':''}${isStub?' stub':''}${sel?' selected':''}${delCls}${extraCls}"
+        id="tr-${key.replace('/','_')}"
+        onclick="rowClick('${key}')"
+        ${isOrphan ? 'title="File was deleted externally — RFID card for this slot is broken"' : ''}>
+      <input type="checkbox" class="tr-cb" ${sel?'checked':''} onclick="event.stopPropagation();toggleSel('${key}')">
+      <div class="tr-body">
+        <div class="tr-num" style="${numStyle}">${fname}${sizeStr}</div>
+        ${nameHtml}
+        <div class="tr-playbar"><div class="tr-playbar-fill" id="pbr-${key.replace('/','_')}"></div></div>
+      </div>
+      ${!isOrphan ? `<button class="tr-play" id="pbtn-${key.replace('/','_')}"
+          title="${playBtnTitle}"
+          onclick="event.stopPropagation();togglePlay('${key}')">${playBtnIcon}</button>` : ''}
+      ${!isOrphan && !sdDelMode ? `<button class="tr-edit" title="Edit (trim, etc.)" onclick="event.stopPropagation();editTrack('${key}')">✏️</button>` : ''}
+      ${!isOrphan && !sdDelMode ? `<button class="tr-del" title="Replace with silent stub (safe — RFID preserved)" onclick="event.stopPropagation();stubTrack('${key}')">🔇</button>` : ''}
+    </div>`;
+  }
+
+  const rows = [];
+  for (const f of sdMusic) rows.push(makeRow('MUSIC/'+f.name, f.name, tracklist['MUSIC/'+f.name]||'', f.size, false));
+  for (const k of orphMusic) rows.push(makeRow(k, k.split('/')[1], tracklist[k]||'', 0, true));
+  for (const f of sdOther) rows.push(makeRow('OTHER/'+f.name, f.name, tracklist['OTHER/'+f.name]||'', f.size, false));
+  for (const k of orphOther) rows.push(makeRow(k, k.split('/')[1], tracklist[k]||'', 0, true));
+
+  // Section headers inside the list
+  const musicSection = sdMusic.length + orphMusic.length;
+  const otherSection = sdOther.length + orphOther.length;
+
+  let html = '';
+
+  // ── macOS junk file warning ──
+  if (sdJunk.length > 0) {
+    const names = sdJunk.map(j => `<code style="font-size:10px;color:var(--muted)">${escHtml(j.folder+'/'+j.name)}</code>`).join('<br>');
+    html += `<div style="background:#3a1a1a;border:1px solid #7a2020;border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:11px;line-height:1.5">
+      <div style="color:#ff8080;font-weight:600;margin-bottom:4px">⚠ ${sdJunk.length} macOS junk file${sdJunk.length>1?'s':''} found</div>
+      <div style="margin-bottom:7px;color:var(--muted)">These <code style="font-size:10px">._*</code> resource-fork files break the player's track count.</div>
+      <div style="margin-bottom:7px">${names}</div>
+      <button class="btn btn-danger btn-sm" onclick="deleteJunk()">🗑 Delete all junk files</button>
+    </div>`;
+  }
+
+  if (musicSection > 0) {
+    html += `<div class="folder-header"><span>📁 MUSIC</span><span class="badge" id="musicBadge">${sdMusic.length}${orphMusic.length?` +${orphMusic.length}⚠`:''}</span></div>`;
+    html += rows.slice(0, musicSection).join('');
+  } else {
+    html += `<div class="folder-header"><span>📁 MUSIC</span><span class="badge" id="musicBadge">0</span></div><div class="empty-hint">empty</div>`;
+  }
+  html += `<div class="folder-header" style="margin-top:10px"><span>📁 OTHER</span><span class="badge" id="otherBadge">${sdOther.length}${orphOther.length?` +${orphOther.length}⚠`:''}</span></div>`;
+  if (otherSection > 0) {
+    html += rows.slice(musicSection).join('');
+  } else {
+    html += `<div class="empty-hint">empty</div>`;
+  }
+  document.getElementById('sdTrackList').innerHTML = html;
+
+  updateSelBar();
+}
+
+// ── Delete mode / selection ───────────────────────────────────────────────────
+
+function toggleDelMode() {
+  sdDelMode = !sdDelMode;
+  sdSelected.clear();
+  document.getElementById('btnDelMode').textContent = sdDelMode ? '✕ Done' : '☑ Select';
+  document.getElementById('delModeBar').classList.toggle('hidden', !sdDelMode);
+  renderSD();
+}
+
+function rowClick(key) {
+  if (!sdDelMode) return;
+  toggleSel(key);
+}
+
+function toggleSel(key) {
+  if (sdSelected.has(key)) sdSelected.delete(key); else sdSelected.add(key);
+  updateSelBar();
+  renderSD();
+}
+
+function selectAll() {
+  const allKeys = [
+    ...sdMusic.map(f => 'MUSIC/' + f.name),
+    ...sdOther.map(f => 'OTHER/' + f.name),
+  ];
+  if (sdSelected.size === allKeys.length) sdSelected.clear();
+  else allKeys.forEach(k => sdSelected.add(k));
+  updateSelBar();
+  renderSD();
+}
+
+function updateSelBar() {
+  const n = sdSelected.size;
+  document.getElementById('selCount').textContent = n === 0 ? 'None selected' : `${n} selected`;
+  document.getElementById('btnDeleteSel').disabled = n === 0;
+}
+
+// ── Stub: replace a track with a silent placeholder ───────────────────────────
+
+async function deleteJunk() {
+  if (!sdJunk.length) return;
+  sdOp(`Deleting ${sdJunk.length} junk file(s)…`, null);
+  for (let i = 0; i < sdJunk.length; i++) {
+    const j = sdJunk[i];
+    sdOp(`Deleting ${j.name}…`, Math.round((i / sdJunk.length) * 100));
+    try { await j.dir.removeEntry(j.name); } catch(e) { console.warn('Could not delete', j.name, e); }
+  }
+  sdOp('', -1);
+  await refreshSD();
+}
+
+async function stubTrack(key) {
+  if (!sdRoot) return;
+  stopSDPlayback();
+  const [folder, fname] = key.split('/');
+  const dir = folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+  if (!dir) return;
+
+  try {
+    sdOp(`Writing stub → ${fname}…`, 30);
+    const bytes = createSilentMP3();
+    const fh    = await dir.getFileHandle(fname, { create: false });
+    const w     = await fh.createWritable();
+    sdOp(`Writing stub → ${fname}…`, 60);
+    await w.write(bytes);
+    await w.close();
+
+    const list  = folder === 'MUSIC' ? sdMusic : sdOther;
+    const entry = list.find(f => f.name === fname);
+    if (entry) entry.size = bytes.length;
+
+    sdOp(`Updating tracklist…`, 85);
+    const orig = tracklist[key];
+    tracklist[key] = (orig ? orig + ' [stub]' : '[stub]');
+    await writeTracklist();
+
+    sdOp('', -1);
+    renderSD();
+    toast(`${fname} replaced with silent stub`);
+  } catch(e) {
+    sdOp('', -1);
+    alert('Stub failed: ' + e.message);
+  }
+}
+
+// Create a minimal silent MP3 using lamejs (~300 bytes)
+function createSilentMP3() {
+  const enc    = new lamejs.Mp3Encoder(1, 44100, 64);
+  const silence = new Int16Array(1152);
+  const buf1   = enc.encodeBuffer(silence);
+  const buf2   = enc.flush();
+  const chunks = [];
+  if (buf1.length > 0) chunks.push(new Uint8Array(buf1));
+  if (buf2.length > 0) chunks.push(new Uint8Array(buf2));
+  const total = chunks.reduce((s,c) => s+c.length, 0);
+  const out   = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { out.set(c, off); off += c.length; }
+  return out;
+}
+
+// ── True delete + renumber ────────────────────────────────────────────────────
+
+function confirmDelete() {
+  const keys = [...sdSelected];
+  if (keys.length === 0) return;
+
+  // Group by folder — we only handle one folder at a time for safety
+  const musicKeys = keys.filter(k => k.startsWith('MUSIC/'));
+  const otherKeys = keys.filter(k => k.startsWith('OTHER/'));
+
+  // Build the full operation plan
+  const plan = buildRenamePlan('MUSIC', musicKeys)
+    .concat(buildRenamePlan('OTHER', otherKeys));
+
+  const delLines  = keys.map(k => `<div class="del-entry">✕ ${k}  —  ${escHtml(tracklist[k]||'')}</div>`).join('');
+  const renLines  = plan.filter(p => p.type==='rename').map(p =>
+    `<div class="ren-entry">  ${p.folder}/${p.from} → ${p.folder}/${p.to}  ${escHtml(tracklist[p.folder+'/'+p.from]||'')}</div>`
+  ).join('');
+
+  const hasRenames = plan.some(p => p.type === 'rename');
+  const rfidAffected = plan.filter(p => p.type === 'rename' && tracklist[p.folder+'/'+p.from]).length;
+
+  document.getElementById('warnIntro').textContent =
+    `Deleting ${keys.length} track(s).` +
+    (hasRenames ? ` ${plan.filter(p=>p.type==='rename').length} track(s) will be renumbered to fill the gaps.` : '');
+  document.getElementById('warnList').innerHTML = delLines + (renLines ? '<hr style="border-color:#333;margin:6px 0">' + renLines : '');
+  document.getElementById('warnRfid').style.display = rfidAffected > 0 ? 'block' : 'none';
+
+  pendingDeleteFolder = null;
+  pendingDeleteKeys   = keys;
+
+  document.getElementById('btnConfirmDelete').onclick = async () => {
+    document.getElementById('warnOverlay').classList.remove('open');
+    await executePlan(plan, keys);
+  };
+  document.getElementById('warnOverlay').classList.add('open');
+}
+
+// Build plan: for each folder, sort remaining files and renumber to fill gaps
+function buildRenamePlan(folder, deletedKeys) {
+  const plan = [];
+  const list = (folder === 'MUSIC' ? sdMusic : sdOther).map(f => f.name);
+  const delSet = new Set(deletedKeys.map(k => k.split('/')[1]));
+
+  // Mark deletes
+  for (const fname of list) {
+    if (delSet.has(fname)) plan.push({ type: 'delete', folder, fname });
+  }
+
+  // Remaining files, compute new sequential numbers
+  const remaining = list.filter(f => !delSet.has(f));
+  remaining.forEach((fname, idx) => {
+    const newName = pad(idx + 1) + '.mp3';
+    if (fname !== newName) {
+      plan.push({ type: 'rename', folder, from: fname, to: newName });
+    }
+  });
+
+  return plan;
+}
+
+async function executePlan(plan, deletedKeys) {
+  stopSDPlayback();
+
+  const deletes = plan.filter(p => p.type === 'delete');
+  // Sort renames ascending by source number — each target slot is always
+  // already free (either deleted or just vacated), so no conflicts, no tmp.
+  const renames = plan.filter(p => p.type === 'rename')
+    .sort((a, b) => parseInt(a.from) - parseInt(b.from));
+
+  const totalSteps = deletes.length + renames.length + 2;
+  let step = 0;
+  const tick = (label) => { step++; sdOp(label, Math.round((step / totalSteps) * 90)); };
+
+  try {
+    // 1. Delete
+    for (const p of deletes) {
+      tick(`Deleting ${p.fname}…`);
+      await (p.folder === 'MUSIC' ? sdMusicDir : sdOtherDir).removeEntry(p.fname);
+    }
+
+    // 2. Rename — use fileHandle.move() (metadata-only on FAT32, instant)
+    //    Falls back to copy+delete for older browsers without move() support.
+    for (const r of renames) {
+      tick(`Renaming ${r.from} → ${r.to}…`);
+      const dir = r.folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+      const fh  = await dir.getFileHandle(r.from);
+      if (typeof fh.move === 'function') {
+        await fh.move(r.to);
+      } else {
+        // Fallback: copy + delete (slow on large files / slow cards)
+        const bytes = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+        const dst   = await dir.getFileHandle(r.to, { create: true });
+        const w     = await dst.createWritable();
+        await w.write(bytes); await w.close();
+        await dir.removeEntry(r.from);
+      }
+    }
+
+    // 3. Update tracklist
+    sdOp('Updating tracklist…', 92);
+    for (const key of deletedKeys) delete tracklist[key];
+    for (const r of renames) {
+      const oldKey = r.folder + '/' + r.from;
+      const newKey = r.folder + '/' + r.to;
+      if (tracklist[oldKey]) { tracklist[newKey] = tracklist[oldKey]; delete tracklist[oldKey]; }
+    }
+    await writeTracklist();
+
+    sdOp('Refreshing…', 96);
+    sdSelected.clear();
+    sdDelMode = false;
+    document.getElementById('btnDelMode').textContent = '☑ Select';
+    document.getElementById('delModeBar').classList.add('hidden');
+
+    await refreshSD();
+    renderQueue();
+    toast(`Deleted ${deletedKeys.length} track(s)`);
+  } catch(e) {
+    sdOp('', -1);
+    alert('Delete failed (SD card may be in inconsistent state — re-open to check):\n' + e.message);
+    await refreshSD();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Drop / file input
+// ──────────────────────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  addFiles([...e.dataTransfer.files].filter(f => isMP3(f.name)));
+});
+fileInput.addEventListener('change', () => { addFiles([...fileInput.files]); fileInput.value = ''; });
+
+function addFiles(files) {
+  files.forEach(file => queue.push({ id: nextId++, file, folder: 'MUSIC',
+    trimStart: 0, trimEnd: 0, buf: null, status: 'pending', savedNum: null }));
+  renderQueue();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Queue rendering
+// ──────────────────────────────────────────────────────────────────────────────
+function renderQueue() {
+  const list   = document.getElementById('queueList');
+  const empty  = document.getElementById('queueEmpty');
+  const footer = document.getElementById('queueFooter');
+  const count  = document.getElementById('queueCount');
+
+  if (queue.length === 0) {
+    list.innerHTML = '';
+    empty.style.display  = 'flex';
+    footer.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const musicBase = safeNextNum('MUSIC');
+  const otherBase = safeNextNum('OTHER');
+  let musicOff = 0, otherOff = 0;
+
+  list.innerHTML = queue.map(item => {
+    let dest = '';
+    if (item.status === 'saved') {
+      dest = `<span class="qi-ok">✓ ${item.folder}/${pad(item.savedNum)}.mp3</span>`;
+    } else {
+      const base = item.folder === 'MUSIC' ? musicBase : otherBase;
+      const off  = item.folder === 'MUSIC' ? musicOff  : otherOff;
+      dest = `<span class="qi-dest">→ ${item.folder}/${pad(base + off)}.mp3</span>`;
+    }
+    if (item.status === 'pending') {
+      if (item.folder === 'MUSIC') musicOff++; else otherOff++;
+    }
+
+    const trimTag = (item.trimStart > 0 || item.trimEnd > 0)
+      ? `<span class="qi-trim">✂ -${item.trimStart.toFixed(1)}s / -${item.trimEnd.toFixed(1)}s</span>`
+      : '';
+
+    const saved = item.status === 'saved';
+    const isQPlaying = queuePlayingId === item.id;
+    const playBtn = `<button class="btn btn-dim btn-sm" id="qpbtn-${item.id}"
+        onclick="toggleQueuePlay(${item.id})"
+        style="${isQPlaying ? 'color:var(--green)' : ''}">${isQPlaying ? '⏹' : '▶'}</button>`;
+    const actions = saved
+      ? playBtn + `<button class="btn btn-dim btn-sm" onclick="removeItem(${item.id})">✕</button>`
+      : playBtn +
+        `<select class="folder-sel" onchange="changeFolder(${item.id},this.value)">
+          <option value="MUSIC" ${item.folder==='MUSIC'?'selected':''}>MUSIC</option>
+          <option value="OTHER" ${item.folder==='OTHER'?'selected':''}>OTHER</option>
+        </select>
+        <button class="btn btn-dim btn-sm" onclick="openTrimmer(${item.id})">✂️</button>
+        <button class="btn btn-green btn-sm" onclick="saveItem(${item.id})" ${!sdRoot?'disabled title="Open SD card first"':''}>💾</button>
+        <button class="btn btn-danger btn-sm" onclick="removeItem(${item.id})">✕</button>`;
+
+    return `<div class="qi ${saved?'saved':''}" id="qi-${item.id}">
+      <div class="qi-info">
+        <div class="qi-name">${escHtml(item.file.name)}</div>
+        <div class="qi-meta">${dest}${trimTag}</div>
+        <div class="prog-bar" id="pb-${item.id}"><div class="prog-fill" id="pbf-${item.id}" style="width:0%"></div></div>
+      </div>
+      <div class="qi-actions">${actions}</div>
+    </div>`;
+  }).join('');
+
+  const pending = queue.filter(q => q.status === 'pending').length;
+  const saved   = queue.filter(q => q.status === 'saved').length;
+  count.textContent = `${pending} pending · ${saved} saved`;
+  footer.style.display = 'flex';
+
+  const btnSave = document.getElementById('btnSaveAll');
+  btnSave.disabled = !sdRoot || pending === 0;
+  btnSave.style.opacity = (sdRoot && pending > 0) ? '1' : '0.5';
+}
+
+function stopQueuePlay() {
+  if (queuePlayingSrc) { try { queuePlayingSrc.stop(); } catch(e) {} queuePlayingSrc = null; }
+  const prev = queuePlayingId;
+  queuePlayingId = null;
+  if (prev !== null) {
+    const btn = document.getElementById('qpbtn-' + prev);
+    if (btn) { btn.textContent = '▶'; btn.style.color = ''; }
+  }
+}
+
+async function toggleQueuePlay(id) {
+  // stop SD playback first
+  stopSDPlayback();
+
+  if (queuePlayingId === id) { stopQueuePlay(); return; }
+  stopQueuePlay();
+
+  const item = queue.find(q => q.id === id);
+  if (!item) return;
+
+  const btn = document.getElementById('qpbtn-' + id);
+  if (btn) { btn.textContent = '⟳'; btn.style.color = 'var(--muted)'; }
+
+  // decode if not cached
+  if (!item.buf) {
+    try {
+      const ab = await item.file.arrayBuffer();
+      item.buf = await audioCtx.decodeAudioData(ab);
+    } catch(e) {
+      if (btn) { btn.textContent = '▶'; btn.style.color = ''; }
+      alert('Could not decode audio: ' + e.message);
+      return;
+    }
+  }
+
+  const dur   = item.buf.duration;
+  const start = item.trimStart || 0;
+  const end   = item.trimEnd   || 0;
+  const tDur  = dur - start - end;
+  if (tDur <= 0) { if (btn) { btn.textContent = '▶'; btn.style.color = ''; } return; }
+
+  const sr = item.buf.sampleRate;
+  const s0 = Math.floor(start * sr), s1 = Math.floor((dur - end) * sr);
+  const sliced = audioCtx.createBuffer(item.buf.numberOfChannels, s1 - s0, sr);
+  for (let ch = 0; ch < item.buf.numberOfChannels; ch++)
+    sliced.getChannelData(ch).set(item.buf.getChannelData(ch).subarray(s0, s1));
+
+  const src = audioCtx.createBufferSource();
+  src.buffer = sliced;
+  src.connect(audioCtx.destination);
+  src.onended = () => { if (queuePlayingId === id) stopQueuePlay(); };
+  src.start();
+
+  queuePlayingSrc = src;
+  queuePlayingId  = id;
+  if (btn) { btn.textContent = '⏹'; btn.style.color = 'var(--green)'; }
+}
+
+function pad(n)      { return String(n).padStart(5, '0'); }
+function fmtSize(b)  { return b < 1024 ? b+'B' : b < 1048576 ? Math.round(b/1024)+'KB' : (b/1048576).toFixed(1)+'MB'; }
+function escHtml(s)  { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function changeFolder(id, folder) {
+  const item = queue.find(q => q.id === id);
+  if (item) { item.folder = folder; renderQueue(); }
+}
+
+function removeItem(id) {
+  if (queuePlayingId === id) stopQueuePlay();
+  queue = queue.filter(q => q.id !== id);
+  renderQueue();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Save to SD card
+// ──────────────────────────────────────────────────────────────────────────────
+document.getElementById('btnSaveAll').addEventListener('click', async () => {
+  if (!sdRoot) return;
+  for (const item of queue.filter(q => q.status === 'pending')) await saveItem(item.id);
+});
+
+async function saveItem(id) {
+  if (!sdRoot) { alert('Open the SD card folder first.'); return; }
+  const item = queue.find(q => q.id === id);
+  if (!item || item.status !== 'pending') return;
+
+  item.status = 'saving';
+  progress(id, 5);
+
+  try {
+    // Get or create the target directory
+    let dir = item.folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+    if (!dir) {
+      dir = await sdRoot.getDirectoryHandle(item.folder, { create: true });
+      if (item.folder === 'MUSIC') sdMusicDir = dir; else sdOtherDir = dir;
+    }
+
+    const trackNum = safeNextNum(item.folder);
+    const filename = pad(trackNum) + '.mp3';
+    const tlKey    = item.folder + '/' + filename;
+
+    // Warn if slot was previously used (safeguard — shouldn't happen with safeNextNum)
+    if (tracklist[tlKey]) {
+      const ok = confirm(
+        `⚠ Slot ${tlKey} was previously:\n"${tracklist[tlKey]}"\n\nRFID cards for this path will play a different song.\n\nContinue?`
+      );
+      if (!ok) { item.status = 'pending'; progress(id, 0); renderQueue(); return; }
+    }
+
+    progress(id, 20);
+
+    let bytes;
+    if (item.trimStart > 0 || item.trimEnd > 0) {
+      if (!item.buf) {
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        item.buf = await audioCtx.decodeAudioData(await item.file.arrayBuffer());
+      }
+      bytes = await encodeMP3(item.buf, item.trimStart, item.trimEnd, p => progress(id, 20 + p * 65));
+    } else {
+      bytes = new Uint8Array(await item.file.arrayBuffer());
+    }
+
+    progress(id, 88);
+
+    const fh = await dir.getFileHandle(filename, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+
+    tracklist[tlKey] = item.file.name;
+    await writeTracklist();
+
+    item.status   = 'saved';
+    item.savedNum = trackNum;
+
+    if (item.folder === 'MUSIC') { sdMusic.push({ name: filename, size: bytes.length }); sdMusic.sort((a,b)=>a.name.localeCompare(b.name)); }
+    else                         { sdOther.push({ name: filename, size: bytes.length }); sdOther.sort((a,b)=>a.name.localeCompare(b.name)); }
+    renderSD();
+
+    progress(id, 100);
+    setTimeout(() => renderQueue(), 250);
+    toast(`Saved as ${item.folder}/${filename}`);
+
+  } catch(e) {
+    item.status = 'pending';
+    progress(id, 0);
+    renderQueue();
+    alert('Save failed: ' + e.message);
+  }
+}
+
+function progress(id, pct) {
+  const pb  = document.getElementById('pb-'  + id);
+  const pbf = document.getElementById('pbf-' + id);
+  if (!pb || !pbf) return;
+  pb.style.display  = pct > 0 && pct < 100 ? 'block' : 'none';
+  pbf.style.width   = pct + '%';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SD track editor — loads existing track into the trimmer for in-place editing
+// ──────────────────────────────────────────────────────────────────────────────
+async function editTrack(key) {
+  const [folder, fname] = key.split('/');
+  const dir = folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+  if (!dir) return;
+
+  stopSDPlayback();
+
+  // Mark row as editing
+  const rowEl = document.getElementById('tr-' + key.replace('/', '_'));
+  if (rowEl) rowEl.classList.add('tr-editing');
+
+  sdOp(`Loading ${fname}…`, null);
+  try {
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const fh   = await dir.getFileHandle(fname);
+    const file = await fh.getFile();
+    const buf  = await audioCtx.decodeAudioData(await file.arrayBuffer());
+    sdOp('', -1);
+
+    // Set trimmer into SD-edit mode
+    trimMode   = 'sd';
+    trimSDKey  = key;
+    trimItem   = { file: { name: tracklist[key] || fname }, buf,
+                   trimStart: 0, trimEnd: 0 };
+
+    stopPreview();
+    document.getElementById('trimTitle').textContent = '✏️  ' + (tracklist[key] || fname);
+    const dur = buf.duration;
+    const sl  = document.getElementById('slStart');
+    const se  = document.getElementById('slEnd');
+    sl.max = se.max = (dur / 2).toFixed(1);
+    sl.value = 0; se.value = 0;
+
+    // Swap buttons
+    document.getElementById('btnTrimApply').style.display = 'none';
+    document.getElementById('btnTrimSave').style.display  = '';
+
+    updateTrimUI();
+    drawWaveform(buf);
+    document.getElementById('trimOverlay').classList.add('open');
+  } catch(e) {
+    sdOp('', -1);
+    if (rowEl) rowEl.classList.remove('tr-editing');
+    alert('Could not load track: ' + e.message);
+  }
+}
+
+async function saveEditedTrack() {
+  if (!trimSDKey || !trimItem) return;
+  const key          = trimSDKey;
+  const [folder, fname] = key.split('/');
+  const dir          = folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+
+  stopPreview();
+  document.getElementById('trimOverlay').classList.remove('open');
+
+  const start = parseFloat(document.getElementById('slStart').value);
+  const end   = parseFloat(document.getElementById('slEnd').value);
+
+  sdOp(`Encoding ${fname}…`, null);
+  try {
+    let bytes;
+    if (start > 0 || end > 0) {
+      bytes = await encodeMP3(trimItem.buf, start, end, p => sdOp(`Encoding ${fname}…`, Math.round(p * 85)));
+    } else {
+      // No trim — re-read original bytes (avoid pointless re-encode)
+      const fh   = await dir.getFileHandle(fname);
+      bytes      = new Uint8Array(await (await fh.getFile()).arrayBuffer());
+    }
+
+    sdOp(`Writing ${fname}…`, 90);
+    const fh = await dir.getFileHandle(fname, { create: false });
+    const w  = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+
+    // Update size in local list
+    const list  = folder === 'MUSIC' ? sdMusic : sdOther;
+    const entry = list.find(f => f.name === fname);
+    if (entry) entry.size = bytes.length;
+
+    sdOp('', -1);
+    toast(`${fname} saved`);
+  } catch(e) {
+    sdOp('', -1);
+    alert('Save failed: ' + e.message);
+  }
+
+  // Clean up
+  const rowEl = document.getElementById('tr-' + key.replace('/', '_'));
+  if (rowEl) rowEl.classList.remove('tr-editing');
+  trimMode  = 'queue';
+  trimSDKey = null;
+  trimItem  = null;
+  renderSD();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Trimmer
+// ──────────────────────────────────────────────────────────────────────────────
+async function openTrimmer(id) {
+  const item = queue.find(q => q.id === id);
+  if (!item) return;
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (!item.buf) item.buf = await audioCtx.decodeAudioData(await item.file.arrayBuffer());
+
+  trimItem = item;
+  stopPreview();
+  document.getElementById('trimTitle').textContent = '✂️  ' + item.file.name;
+
+  const dur = item.buf.duration;
+  const sl  = document.getElementById('slStart');
+  const se  = document.getElementById('slEnd');
+  sl.max = se.max = (dur / 2).toFixed(1);
+  sl.value = item.trimStart;
+  se.value = item.trimEnd;
+
+  updateTrimUI();
+  drawWaveform(item.buf);
+  document.getElementById('trimOverlay').classList.add('open');
+}
+
+document.getElementById('slStart').addEventListener('input', updateTrimUI);
+document.getElementById('slEnd').addEventListener('input', updateTrimUI);
+
+function updateTrimUI() {
+  if (!trimItem) return;
+  const dur   = trimItem.buf.duration;
+  const start = parseFloat(document.getElementById('slStart').value);
+  const end   = parseFloat(document.getElementById('slEnd').value);
+  document.getElementById('valStart').textContent      = start.toFixed(1) + ' s';
+  document.getElementById('valEnd').textContent        = end.toFixed(1) + ' s';
+  document.getElementById('trimDuration').textContent  = Math.max(0, dur - start - end).toFixed(1) + ' s';
+  document.getElementById('trimOriginal').textContent  = dur.toFixed(1) + ' s';
+  const pS = (start / dur) * 100, pE = ((dur - end) / dur) * 100;
+  const sel = document.getElementById('waveSel');
+  sel.style.left  = pS + '%';
+  sel.style.width = Math.max(0, pE - pS) + '%';
+}
+
+document.getElementById('btnTrimReset').addEventListener('click', () => {
+  document.getElementById('slStart').value = 0;
+  document.getElementById('slEnd').value   = 0;
+  updateTrimUI();
+});
+document.getElementById('btnTrimCancel').addEventListener('click', () => {
+  stopPreview();
+  document.getElementById('trimOverlay').classList.remove('open');
+  trimItem = null;
+  // clean up SD-edit mode if active
+  if (trimMode === 'sd' && trimSDKey) {
+    const rowEl = document.getElementById('tr-' + trimSDKey.replace('/', '_'));
+    if (rowEl) rowEl.classList.remove('tr-editing');
+  }
+  trimMode  = 'queue';
+  trimSDKey = null;
+  document.getElementById('btnTrimApply').style.display = '';
+  document.getElementById('btnTrimSave').style.display  = 'none';
+});
+
+document.getElementById('btnTrimSave').addEventListener('click', saveEditedTrack);
+document.getElementById('btnTrimApply').addEventListener('click', () => {
+  if (!trimItem) return;
+  trimItem.trimStart = parseFloat(document.getElementById('slStart').value);
+  trimItem.trimEnd   = parseFloat(document.getElementById('slEnd').value);
+  stopPreview();
+  document.getElementById('trimOverlay').classList.remove('open');
+  trimItem = null;
+  renderQueue();
+});
+
+document.getElementById('btnPreview').addEventListener('click', togglePreview);
+
+function togglePreview() {
+  if (previewSrc) { stopPreview(); return; }
+  const dur   = trimItem.buf.duration;
+  const start = parseFloat(document.getElementById('slStart').value);
+  const end   = parseFloat(document.getElementById('slEnd').value);
+  const tDur  = dur - start - end;
+  if (tDur <= 0) return;
+
+  const sr = trimItem.buf.sampleRate;
+  const s0 = Math.floor(start * sr), s1 = Math.floor((dur - end) * sr);
+  const buf = audioCtx.createBuffer(trimItem.buf.numberOfChannels, s1 - s0, sr);
+  for (let ch = 0; ch < trimItem.buf.numberOfChannels; ch++)
+    buf.getChannelData(ch).set(trimItem.buf.getChannelData(ch).subarray(s0, s1));
+
+  previewSrc = audioCtx.createBufferSource();
+  previewSrc.buffer = buf;
+  previewSrc.connect(audioCtx.destination);
+  previewSrc.start();
+  document.getElementById('btnPreview').textContent = '⏹ Stop';
+  playheadStart = audioCtx.currentTime;
+  document.getElementById('wavePlayhead').style.display = 'block';
+  animPlayhead(tDur, start, dur);
+  previewSrc.onended = stopPreview;
+}
+
+function animPlayhead(trimDur, startSec, totalDur) {
+  function step() {
+    const elapsed = audioCtx.currentTime - playheadStart;
+    if (elapsed > trimDur) { stopPreview(); return; }
+    document.getElementById('wavePlayhead').style.left = (((startSec + elapsed) / totalDur) * 100) + '%';
+    playheadRaf = requestAnimationFrame(step);
+  }
+  playheadRaf = requestAnimationFrame(step);
+}
+
+function stopPreview() {
+  if (previewSrc) { try { previewSrc.stop(); } catch(e){} previewSrc = null; }
+  if (playheadRaf) { cancelAnimationFrame(playheadRaf); playheadRaf = null; }
+  document.getElementById('btnPreview').textContent = '▶ Preview';
+  document.getElementById('wavePlayhead').style.display = 'none';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Waveform canvas
+// ──────────────────────────────────────────────────────────────────────────────
+function drawWaveform(audioBuf) {
+  const wrap   = document.querySelector('.wave-wrap');
+  const canvas = document.getElementById('waveCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W   = wrap.clientWidth, H = wrap.clientHeight;
+  canvas.width  = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx  = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  const data = audioBuf.getChannelData(0);
+  const step = Math.ceil(data.length / W);
+  const amp  = H / 2;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#e0457a'); grad.addColorStop(0.5, '#7c5cbf'); grad.addColorStop(1, '#e0457a');
+  ctx.strokeStyle = grad; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = 0; x < W; x++) {
+    let lo = 1, hi = -1;
+    for (let j = x*step; j < Math.min((x+1)*step, data.length); j++) {
+      if (data[j] < lo) lo = data[j]; if (data[j] > hi) hi = data[j];
+    }
+    ctx.moveTo(x+0.5, amp*(1+lo)); ctx.lineTo(x+0.5, amp*(1+hi));
+  }
+  ctx.stroke();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MP3 encoding with lamejs (used only when trim is applied)
+// ──────────────────────────────────────────────────────────────────────────────
+async function encodeMP3(audioBuf, trimStart, trimEnd, onProgress) {
+  const sr  = audioBuf.sampleRate;
+  const s0  = Math.floor(trimStart * sr);
+  const s1  = Math.floor((audioBuf.duration - trimEnd) * sr);
+  const len = s1 - s0;
+  const ch  = Math.min(audioBuf.numberOfChannels, 2);
+
+  function f32ToI16(arr, off, n) {
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i++) out[i] = Math.max(-32768, Math.min(32767, Math.round(arr[off+i]*32767)));
+    return out;
+  }
+
+  const enc = new lamejs.Mp3Encoder(ch, sr, 192);
+  const bsz = 1152;
+  const chunks = [];
+
+  for (let i = 0; i < len; i += bsz) {
+    const n = Math.min(bsz, len - i);
+    const L = f32ToI16(audioBuf.getChannelData(0), s0+i, n);
+    const R = ch > 1 ? f32ToI16(audioBuf.getChannelData(1), s0+i, n) : L;
+    const out = enc.encodeBuffer(L, R);
+    if (out.length > 0) chunks.push(new Uint8Array(out));
+    if (onProgress) onProgress(i / len);
+    if (i % (bsz * 64) === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  const fl = enc.flush();
+  if (fl.length > 0) chunks.push(new Uint8Array(fl));
+  const total = chunks.reduce((s,c) => s+c.length, 0);
+  const result = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { result.set(c, off); off += c.length; }
+  return result;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SD card playback
+// ──────────────────────────────────────────────────────────────────────────────
+async function togglePlay(key) {
+  if (playingKey === key || loadingKey === key) { stopSDPlayback(); return; }
+  stopSDPlayback();
+
+  const [folder, fname] = key.split('/');
+  const dir = folder === 'MUSIC' ? sdMusicDir : sdOtherDir;
+  if (!dir) return;
+
+  // Mark as loading
+  loadingKey = key;
+  setRowState(key, 'loading');
+
+  try {
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const fh    = await dir.getFileHandle(fname);
+    const file  = await fh.getFile();
+    const ab    = await file.arrayBuffer();
+    // Still loading? (user may have cancelled)
+    if (loadingKey !== key) return;
+    const buf   = await audioCtx.decodeAudioData(ab);
+    if (loadingKey !== key) return;
+
+    loadingKey   = null;
+    playingKey   = key;
+    playingDur   = buf.duration;
+    playingStart = audioCtx.currentTime;
+
+    playingSrc = audioCtx.createBufferSource();
+    playingSrc.buffer = buf;
+    playingSrc.connect(audioCtx.destination);
+    playingSrc.start();
+    playingSrc.onended = () => { if (playingKey === key) stopSDPlayback(); };
+
+    setRowState(key, 'playing');
+    animPlaybar(key);
+  } catch(e) {
+    loadingKey = null;
+    setRowState(key, null);
+    if (e.name !== 'AbortError') alert('Playback failed: ' + e.message);
+  }
+}
+
+function stopSDPlayback() {
+  if (playingSrc)  { try { playingSrc.stop(); } catch(e){} playingSrc = null; }
+  if (playingRaf)  { cancelAnimationFrame(playingRaf); playingRaf = null; }
+  const prevKey = playingKey || loadingKey;
+  playingKey  = null;
+  loadingKey  = null;
+  if (prevKey) setRowState(prevKey, null);
+}
+
+function setRowState(key, state) {
+  // Update row class and button without full re-render
+  const id  = key.replace('/', '_');
+  const row = document.getElementById('tr-' + id);
+  const btn = document.getElementById('pbtn-' + id);
+  if (!row || !btn) return;
+  row.classList.remove('tr-loading', 'tr-playing');
+  if (state === 'loading') {
+    row.classList.add('tr-loading');
+    btn.textContent = '⟳'; btn.title = 'Loading…';
+  } else if (state === 'playing') {
+    row.classList.add('tr-playing');
+    btn.textContent = '⏹'; btn.title = 'Stop';
+  } else {
+    btn.textContent = '▶'; btn.title = 'Play';
+  }
+}
+
+function animPlaybar(key) {
+  const id   = key.replace('/', '_');
+  const fill = document.getElementById('pbr-' + id);
+  function step() {
+    if (playingKey !== key || !fill) return;
+    const elapsed = audioCtx.currentTime - playingStart;
+    fill.style.width = Math.min(100, (elapsed / playingDur) * 100) + '%';
+    playingRaf = requestAnimationFrame(step);
+  }
+  playingRaf = requestAnimationFrame(step);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Inline rename (tracklist only — physical filename unchanged)
+// ──────────────────────────────────────────────────────────────────────────────
+function startRename(key) {
+  const el = document.getElementById('tn-' + key.replace('/', '_'));
+  if (!el || el.querySelector('input')) return;  // already editing
+
+  const current = tracklist[key] || '';
+  const clean   = current.replace(/\s*\[stub\]$/, '');  // strip [stub] suffix for editing
+
+  el.innerHTML = `<input class="tr-rename-input" id="ri-${key.replace('/','_')}"
+    value="${escHtml(clean)}" placeholder="display name…">`;
+
+  const input = el.querySelector('input');
+  input.focus();
+  input.select();
+
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); finishRename(key); }
+    if (e.key === 'Escape') { e.preventDefault(); cancelRename(key); }
+    e.stopPropagation();
+  });
+  input.addEventListener('blur', () => finishRename(key));
+  // Prevent row click / play from triggering while editing
+  input.addEventListener('click', e => e.stopPropagation());
+}
+
+async function finishRename(key) {
+  const id    = key.replace('/', '_');
+  const el    = document.getElementById('tn-' + id);
+  const input = el && el.querySelector('input');
+  if (!input) return;
+
+  const newName = input.value.trim();
+  // Restore stub suffix if the file is a stub
+  const isStub  = tracklist[key] && tracklist[key].endsWith('[stub]');
+  tracklist[key] = newName
+    ? newName + (isStub ? ' [stub]' : '')
+    : (isStub ? '[stub]' : '');
+
+  // Update the DOM immediately (no full re-render)
+  el.innerHTML = newName
+    ? escHtml(newName) + (isStub ? ' <span class="stub-badge">stub</span>' : '')
+    : '<span style="color:var(--muted);font-style:italic">click to name…</span>';
+
+  if (sdRoot) {
+    try { await writeTracklist(); }
+    catch(e) { toast('Could not save tracklist: ' + e.message); }
+  }
+}
+
+function cancelRename(key) {
+  const id   = key.replace('/', '_');
+  const el   = document.getElementById('tn-' + id);
+  if (!el)   return;
+  const name = tracklist[key] || '';
+  const isStub = name.endsWith('[stub]');
+  const clean  = name.replace(/\s*\[stub\]$/, '');
+  el.innerHTML = clean
+    ? escHtml(clean) + (isStub ? ' <span class="stub-badge">stub</span>' : '')
+    : '<span style="color:var(--muted);font-style:italic">click to name…</span>';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SD operation progress bar
+// ──────────────────────────────────────────────────────────────────────────────
+function sdOp(label, pct) {
+  // pct: 0–100 = determinate; null = indeterminate; -1 = hide
+  const bar   = document.getElementById('sdOpBar');
+  const lbl   = document.getElementById('sdOpLabel');
+  const fill  = document.getElementById('sdOpFill');
+  if (pct === -1) {
+    bar.classList.remove('active');
+    fill.classList.remove('indeterminate');
+    return;
+  }
+  bar.classList.add('active');
+  lbl.textContent = label;
+  if (pct === null) {
+    fill.classList.add('indeterminate');
+    fill.style.width = '40%';
+  } else {
+    fill.classList.remove('indeterminate');
+    fill.style.width = pct + '%';
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Toast
+// ──────────────────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// Init
+renderQueue();
+</script>
+</body>
+</html>

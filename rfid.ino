@@ -18,6 +18,7 @@
 #define RFID_PATH_BYTES 32
 
 MFRC522 mfrc522(PIN_RFID_SS, PIN_RFID_RST);
+static bool rfidReady = false;
 
 #define RFID_UNKNOWN 0
 #define RFID_CLASSIC 1
@@ -26,7 +27,24 @@ MFRC522 mfrc522(PIN_RFID_SS, PIN_RFID_RST);
 void rfidSetup() {
   SPI.begin(PIN_RFID_SCK, PIN_RFID_MISO, PIN_RFID_MOSI, PIN_RFID_SS);
   mfrc522.PCD_Init();
-  Serial.println("[RFID] RC522 ready");
+
+  // A disconnected or miswired reader normally returns all zeroes or all ones.
+  // Reading VersionReg is non-destructive and confirms that SPI communication
+  // works before normal card polling starts.
+  byte version = mfrc522.PCD_ReadRegister(MFRC522::VersionReg);
+  // Known MFRC522 values: genuine revisions 0.0/1.0/2.0, plus common
+  // clone/counterfeit identifiers recognized by the MFRC522 library.
+  rfidReady = version == 0x90 || version == 0x91 || version == 0x92 ||
+              version == 0x88 || version == 0x12;
+
+  Serial.print("[RFID] Boot test: version 0x");
+  if (version < 0x10) Serial.print('0');
+  Serial.print(version, HEX);
+  if (rfidReady) {
+    Serial.println(" — SPI communication OK");
+  } else {
+    Serial.println(" — FAILED/UNKNOWN (check 3.3V, GND, SDA/SS, SCK, MOSI, MISO and RST)");
+  }
 }
 
 static byte rfidDetectType() {
@@ -102,6 +120,7 @@ static bool ntagWritePath(byte *data) {
 //        -1 if card is present but blank/unreadable,
 //         0 if no card.
 int rfidReadPath(char *outPath, uint8_t maxLen) {
+  if (!rfidReady) return 0;
   if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial())
     return 0;
 
@@ -127,6 +146,7 @@ int rfidReadPath(char *outPath, uint8_t maxLen) {
 
 // Writes a full path to the card. Returns true on success.
 bool rfidWritePath(const char *path) {
+  if (!rfidReady) return false;
   if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial())
     return false;
 
