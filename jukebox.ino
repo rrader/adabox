@@ -49,7 +49,7 @@ struct Btn {
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 
-#define FW_VERSION  "2.1.0"
+#define FW_VERSION  "2.1.1"
 #define DEVICE_NAME "adabox"
 #define AP_SSID     "AdaBox-Setup"
 
@@ -317,8 +317,8 @@ void loadState() {
   rfidTrack  = prefs.getInt("rfid", 1);
   browseMode = prefs.getInt("mode", 0) ? BROWSE_RFID : BROWSE_MUSIC;
   currentVolume = constrain(prefs.getInt("vol", VOLUME_DEFAULT), VOLUME_MIN, VOLUME_MAX);
-  prefs.end();
   ledLevel = constrain(prefs.getInt("led", LED_LEVEL_DEFAULT), LED_LEVEL_MIN, LED_LEVEL_MAX);
+  prefs.end();
   savedVolume = currentVolume;
   savedLedLevel = ledLevel;
   if (musicTrack < 1 || musicTrack > totalMusicTracks) musicTrack = 1;
