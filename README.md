@@ -71,6 +71,9 @@ While stopped, hold Next for 5 seconds to toggle between MUSIC and OTHER browse 
 | Next pressed | Clockwise cyan comet sweep |
 | Prev pressed | Counter-clockwise yellow comet sweep |
 | Track ends | White burst flash, auto-advances to next track |
+| Volume changed | Blue arc overlay (1..16 LEDs, 1.2s) |
+| LED level changed | Amber arc overlay (0..16 LEDs, 1.2s) |
+| Next / Prev / Auto-advance | Track number dots overlay (2s): 1..16 dots in ring color; next 16s fill another ring with the next contrasting color (up to 160 tracks across 10 colors) |
 
 ## Libraries
 
@@ -111,7 +114,7 @@ Survives power-off and re-flashing (as long as "Erase All Flash" is off and the 
 
 ## Flashing
 
-`scripts/flash.sh build` compiles, `scripts/flash.sh upload [port]` also uploads (uses the arduino-cli bundled with Arduino IDE, board `esp32:esp32:esp32`). Libraries: FastLED, MFRC522.
+`scripts/flash.sh build` compiles, `scripts/flash.sh upload [port]` also uploads. `scripts/serial_log.py [seconds] [port]` resets via RTS and prints the serial console (uses the arduino-cli bundled with Arduino IDE, board `esp32:esp32:esp32`). Libraries: FastLED, MFRC522.
 
 ## Adjusting volume
 
