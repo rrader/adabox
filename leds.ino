@@ -33,6 +33,26 @@ void ledSetup() {
   FastLED.show();
 }
 
+void stepBootAnimation() {
+  static uint8_t bootPos = 0;
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  for (int t = 0; t < 5; t++) {
+    int idx = (bootPos - t + NUM_LEDS) % NUM_LEDS;
+    leds[idx] = CRGB(0, 180, 255);
+    leds[idx].nscale8(255 - t * 48);
+  }
+  FastLED.show();
+  bootPos = (bootPos + 1) % NUM_LEDS;
+}
+
+void delayWithBootAnimation(uint32_t ms) {
+  uint32_t start = millis();
+  while (millis() - start < ms) {
+    stepBootAnimation();
+    delay(40);
+  }
+}
+
 // Pick direction and base color for the next spinner run, deterministically
 // from `seed` so the same track always looks the same.
 // Music: any starting offset on the rainbow.
@@ -187,18 +207,16 @@ void updateLEDs() {
 
   switch (animMode) {
 
-  case ANIM_BREATHE:
-    if (now - lastLedMs < 14)
+  case ANIM_BREATHE: {
+    if (now - lastLedMs < 20)
       break;
     lastLedMs = now;
-    breathVal = constrain((int)breathVal + breathDir * 3, 5, 180);
-    if (breathVal >= 180)
-      breathDir = -1;
-    if (breathVal <= 5)
-      breathDir = 1;
+    // Mathematically continuous sine-wave breathing locked to clock: 16 BPM, smooth 8-bit curve
+    uint8_t breathVal = beatsin8(16, 5, 180);
     fill_solid(leds, NUM_LEDS, CHSV(96, 220, breathVal)); // green idle
     FastLED.show();
     break;
+  }
 
   case ANIM_SPINNER: {
     // Full-ring two-tone gradient rotating smoothly around the ring.

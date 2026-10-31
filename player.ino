@@ -73,11 +73,13 @@ void playerPlayFolderTrack(const char *folder, int track) {
 // The response (AA 12 02 HI LO SM) can be preceded by stray bytes from the
 // preceding playback/stop, so we scan the stream for the header instead of
 // assuming a clean 6-byte aligned read.
+void delayWithBootAnimation(uint32_t ms);
+
 uint16_t playerQueryFolderCount(const char *folder) {
   playerPlayFolderTrack(folder, 1);
-  delay(400); // let module process path and set folder context
+  delayWithBootAnimation(400); // let module process path and set folder context
   playerStop();
-  delay(200);
+  delayWithBootAnimation(200);
   while (Serial2.available()) Serial2.read(); // flush
 
   playerCmd(0x12, 0, nullptr);

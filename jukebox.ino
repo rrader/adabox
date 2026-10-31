@@ -49,9 +49,13 @@ struct Btn {
 #include <Update.h>
 #include <ESPmDNS.h>
 
-#define FW_VERSION  "2.3.0"
+#define FW_VERSION  "2.3.2"
 #define DEVICE_NAME "adabox"
 #define AP_SSID     "AdaBox-Setup"
+
+void stepBootAnimation();
+void delayWithBootAnimation(uint32_t ms);
+void startSweep(bool cw, CRGB color);
 
 
 // ── Pin map ──────────────────────────────────────────────────────────────────
@@ -309,13 +313,15 @@ void wifiSetup() {
   }
 
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false); // Disable modem sleep to prevent CPU frequency throttling and WiFi latency jitter
   WiFi.setHostname(DEVICE_NAME);
   WiFi.begin(ssid.c_str(), pass.c_str());
   Serial.print("[WiFi] Connecting to "); Serial.print(ssid);
 
   uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - start < 12000)) {
-    delay(250);
+  while (WiFi.status() != WL_CONNECTED && (millis() - start < 8000)) {
+    stepBootAnimation();
+    delay(40);
     Serial.print(".");
   }
   Serial.println();
@@ -545,23 +551,28 @@ void setup() {
   pinMode(PIN_BTN_PREV, INPUT_PULLUP);
   pinMode(PIN_BUSY, INPUT);
 
+  loadState();       // Restore volume and ledLevel immediately
   ledSetup();
+  applyBrightness();
+  stepBootAnimation(); // First visual frame lit instantly within 10ms of power-on!
+
   encoderSetup();
 
-  delay(800); // let DY-SV5W boot
+  delayWithBootAnimation(800); // let DY-SV5W boot while spinner glides smoothly
   playerVolume(currentVolume);
 
   totalMusicTracks = playerQueryFolderCount(MUSIC_FOLDER);
   if (totalMusicTracks == 0) totalMusicTracks = 1;
+  musicTrack = constrain(musicTrack, 1, (int)totalMusicTracks);
   Serial.print("[Jukebox] MUSIC tracks: ");
   Serial.println(totalMusicTracks);
 
   totalRfidTracks = playerQueryFolderCount(RFID_FOLDER);
   if (totalRfidTracks == 0) totalRfidTracks = 1;
+  rfidTrack = constrain(rfidTrack, 1, (int)totalRfidTracks);
   Serial.print("[Jukebox] RFID tracks: ");
   Serial.println(totalRfidTracks);
 
-  loadState();
   playerVolume(currentVolume); // apply restored volume
   applyBrightness();           // apply restored LED brightness
   Serial.print("[Jukebox] Restored: vol=");
@@ -577,6 +588,8 @@ void setup() {
 
   lastActivityMs = millis();
   wifiSetup();
+  startSweep(true, CRGB::Green); // Ready sweep!
+
   Serial.print("[Jukebox] Version v");
   Serial.print(FW_VERSION);
   Serial.println(" Ready.");
@@ -788,32 +801,36 @@ void loop() {
       animMode = preProgramMode;
     }
   } else {
-    char rfidPath[32];
-    int result = rfidReadPath(rfidPath, sizeof(rfidPath));
-    if (result != 0) lastActivityMs = millis();
-    if (result == 1) {
-      if (isPlaying && playContext == CTX_RFID && strcmp(rfidPath, lastRfidPath) == 0) {
-        Serial.println("[RFID] Already playing this track, ignoring");
-      } else {
-        strncpy(lastRfidPath, rfidPath, sizeof(lastRfidPath));
-        playContext = CTX_RFID;
-        Serial.print("[RFID] Playing ");
-        Serial.println(rfidPath);
-        untrackOther(true);
-        playerPlayPath(rfidPath);
-        if (strncmp(rfidPath, "/" RFID_FOLDER "/", strlen(RFID_FOLDER) + 2) == 0) {
-          int n = atoi(rfidPath + strlen(RFID_FOLDER) + 2);
-          if (n > 0) trackOther(n, true);
+    static uint32_t lastRfidPoll = 0;
+    if (millis() - lastRfidPoll >= 60) {
+      lastRfidPoll = millis();
+      char rfidPath[32];
+      int result = rfidReadPath(rfidPath, sizeof(rfidPath));
+      if (result != 0) lastActivityMs = millis();
+      if (result == 1) {
+        if (isPlaying && playContext == CTX_RFID && strcmp(rfidPath, lastRfidPath) == 0) {
+          Serial.println("[RFID] Already playing this track, ignoring");
+        } else {
+          strncpy(lastRfidPath, rfidPath, sizeof(lastRfidPath));
+          playContext = CTX_RFID;
+          Serial.print("[RFID] Playing ");
+          Serial.println(rfidPath);
+          untrackOther(true);
+          playerPlayPath(rfidPath);
+          if (strncmp(rfidPath, "/" RFID_FOLDER "/", strlen(RFID_FOLDER) + 2) == 0) {
+            int n = atoi(rfidPath + strlen(RFID_FOLDER) + 2);
+            if (n > 0) trackOther(n, true);
+          }
+          isPlaying = true;
+          applyBrightness();
+          randomizeSpinner(hashPath(rfidPath));
+          animMode = ANIM_SPINNER;
+          startFlash(CRGB::Magenta);
         }
-        isPlaying = true;
-        applyBrightness();
-        randomizeSpinner(hashPath(rfidPath));
-        animMode = ANIM_SPINNER;
-        startFlash(CRGB::Magenta);
+      } else if (result == -1) {
+        Serial.println("[RFID] Card has no path written");
+        startFlash(CRGB::Red);
       }
-    } else if (result == -1) {
-      Serial.println("[RFID] Card has no path written");
-      startFlash(CRGB::Red);
     }
   }
 
@@ -840,7 +857,7 @@ void loop() {
   if (apMode) {
     dnsServer.processNextRequest();
     server.handleClient();
-  } else if (WiFi.status() == WL_CONNECTED) {
+  } else if (wifiConnected) {
     server.handleClient();
   }
 }
