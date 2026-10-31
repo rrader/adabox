@@ -49,7 +49,7 @@ struct Btn {
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
 
-#define FW_VERSION  "2.1.1"
+#define FW_VERSION  "2.2.2"
 #define DEVICE_NAME "adabox"
 #define AP_SSID     "AdaBox-Setup"
 
@@ -103,6 +103,7 @@ int savedMusicTrack = -1, savedRfidTrack = -1, savedBrowse = -1;
 WebServer server(80);
 DNSServer dnsServer;
 bool otaReady = false;
+volatile bool isOtaUpdating = false;
 bool apMode = false;
 bool wifiConnected = false;
 
@@ -138,6 +139,7 @@ uint32_t programModeStart = 0;
 void setupOTA() {
   ArduinoOTA.setHostname(DEVICE_NAME);
   ArduinoOTA.onStart([]() {
+    isOtaUpdating = true;
     Serial.println("[OTA] Firmware update started!");
     playerStop();
     fill_solid(leds, NUM_LEDS, CRGB::Blue);
@@ -150,11 +152,13 @@ void setupOTA() {
     FastLED.show();
   });
   ArduinoOTA.onEnd([]() {
+    isOtaUpdating = false;
     fill_solid(leds, NUM_LEDS, CRGB::Green);
     FastLED.show();
     Serial.println("\n[OTA] Update complete! Rebooting...");
   });
   ArduinoOTA.onError([](ota_error_t error) {
+    isOtaUpdating = false;
     Serial.printf("[OTA] Error[%u]\n", error);
     fill_solid(leds, NUM_LEDS, CRGB::Red);
     FastLED.show();
@@ -203,6 +207,7 @@ void setupWebServer() {
       html += "<p>Track: <b>#" + String(browseMode == BROWSE_MUSIC ? musicTrack : rfidTrack) + "</b> (" + String(isPlaying ? "Playing ▶" : "Stopped ⏹") + ")</p>";
       html += "<p>Volume: <b>" + String(currentVolume) + "</b> / " + String(VOLUME_MAX) + "</p>";
       html += "<p>LED Level: <b>" + String(ledLevel) + "</b> / 10</p>";
+      html += "<p><a href='/update' style='display:inline-block;margin-top:14px;color:#80d4ff;text-decoration:none;font-size:12px;'>⚡ OTA Firmware Update</a></p>";
       html += "<p><a href='/reset-wifi' class='btn' >⚠ Reset Wi-Fi</a></p>";
       html += "</div></body></html>";
       server.send(200, "text/html", html);
@@ -247,6 +252,55 @@ void setupWebServer() {
     server.send(200, "text/html", "Wi-Fi reset. Rebooting to AdaBox-Setup hotspot...");
     delay(1000);
     ESP.restart();
+  });
+
+  server.on("/update", HTTP_GET, []() {
+    String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
+    html += "<title>AdaBox Update</title><style>body{font-family:sans-serif;background:#181824;color:#eee;padding:24px;text-align:center}";
+    html += ".card{background:#222234;max-width:340px;margin:0 auto;padding:24px;border-radius:12px;border:1px solid #333}";
+    html += "h1{color:#80d4ff;font-size:20px;margin:0 0 12px 0}input[type=file]{margin:16px 0;width:100%;color:#aaa}";
+    html += "input[type=submit]{background:#388bfd;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;cursor:pointer;width:100%}";
+    html += "a{color:#888;text-decoration:none;font-size:12px;display:inline-block;margin-top:16px}</style></head>";
+    html += "<body><div class='card'><h1>📻 AdaBox OTA Update</h1>";
+    html += "<p style='font-size:13px;color:#aaa'>Select compiled <code>jukebox.ino.bin</code>:</p>";
+    html += "<form method='POST' action='/update' enctype='multipart/form-data'>";
+    html += "<input type='file' name='update' accept='.bin' required><br>";
+    html += "<input type='submit' value='Flash Firmware'>";
+    html += "</form><a href='/'>← Back to Dashboard</a></div></body></html>";
+    server.send(200, "text/html", html);
+  });
+
+  server.on("/update", HTTP_POST, []() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+    delay(500);
+    ESP.restart();
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      isOtaUpdating = true;
+      Serial.printf("[WebOTA] Update: %s\n", upload.filename.c_str());
+      fill_solid(leds, NUM_LEDS, CRGB::Blue);
+      FastLED.show();
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (Update.end(true)) {
+        Serial.printf("[WebOTA] Success: %u bytes! Rebooting...\n", upload.totalSize);
+        fill_solid(leds, NUM_LEDS, CRGB::Green);
+        FastLED.show();
+      } else {
+        Update.printError(Serial);
+        fill_solid(leds, NUM_LEDS, CRGB::Red);
+        FastLED.show();
+      }
+      isOtaUpdating = false;
+    }
   });
 
   server.onNotFound([]() {
@@ -562,6 +616,12 @@ void setup() {
 }
 
 void loop() {
+  if (isOtaUpdating) {
+    ArduinoOTA.handle();
+    server.handleClient();
+    return;
+  }
+
   // ── Encoder ──
   int delta = drainEncoder();
   if (delta != 0) {

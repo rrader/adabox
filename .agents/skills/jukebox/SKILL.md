@@ -41,7 +41,7 @@ DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9
 
 ## Мережа, Wi-Fi Captive Portal, OTA та Home Assistant
 
-- **Версія прошивки:** `v2.1.0` (`#define FW_VERSION "2.1.0"` у `jukebox.ino`).
+- **Версія прошивки:** `v2.2.2` (`#define FW_VERSION "2.2.2"` у `jukebox.ino`).
 - **Wi-Fi Hotspot & Captive Portal:** Якщо в NVS немає креденшелів Wi-Fi, запускається точка доступу `AdaBox-Setup` (192.168.4.1) з DNS Captive Portal. Користувач обирає мережу або вводить вручну SSID і пароль, дані зберігаються в NVS (`prefs.putString("wifi_ssid", ...)`), плата перезавантажується та підключається до Wi-Fi. Паролі не хардкодяться в коді.
 - **Статичний IP та локальний домен на UniFi UDR7:**
   - MAC-адреса: `30:76:f5:ee:bc:04`.
@@ -49,13 +49,19 @@ DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9
   - Локальний домен: `adabox.lan` (також `adabox` і mDNS `adabox.local`), налаштовано у `/run/dnsmasq.dhcp.conf.d/adabox.conf` на UDR7. Не резолвити через `*.rmn.pp.ua`, щоб не потрапляти у проксі Cloudflare.
 - **Веб-інтерфейс та API:**
   - Головна сторінка: `http://adabox.lan/` — статус, поточний режим, трек, гучність, LED, посилання на OTA.
-  - JSON API: `http://adabox.lan/info` — повертає `{"name":"adabox","version":"2.1.0","status":"idle","mode":"OTHER","track":1,"volume":12,"led":10,"rssi":-71,"ip":"192.168.1.88"}` для автоматизації.
-  - Оновлення прошивки: Веб-форма `http://adabox.lan/update` та ArduinoOTA (порт 3232, `adabox.local`).
+  - JSON API: `http://adabox.lan/info` — повертає `{"name":"adabox","version":"2.2.2","status":"idle","mode":"OTHER","track":1,"volume":12,"led":4,"rssi":-75,"ip":"192.168.1.88"}` для автоматизації.
+  - Оновлення прошивки:
+    - **WebOTA (`/update`):** браузерна форма та прямий multipart POST (`scripts/flash.sh web-ota adabox.lan`). Працює незалежно від фаєрволу Mac, бо використовує вихідний HTTP-клієнт.
+    - **ArduinoOTA (порт 3232):** `scripts/flash.sh ota adabox.lan`. Автоматично визначає локальний IP Mac (`-I $HOST_IP`), щоб уникнути конфліктів із macOS VPN/Teleport (`utun0`).
+    - **Ізоляція процесора під час OTA:** прапорець `isOtaUpdating` на початку `loop()` заморожує `FastLED.show()` (який апаратно блокує переривання для WS2812), опитування MFRC522 по SPI та UART плеєра, віддаючи 100% CPU мережі та запису у Flash.
+- **Збереження стану (NVS) та виправлення багів:**
+  - **LED Level:** ключ `led` (0–10). Раніше `prefs.end()` викликався перед читанням `prefs.getInt("led")`, що скидало яскравість до 10 після вимкнення живлення. Виправлено: `prefs.end()` закривається після зчитування всіх параметрів.
 - **Інтеграція в Home Assistant:**
   - Файли інтеграції збережено в `projects/jukebox/home-assistant/`:
     - `adabox_sensors.yaml`: блок `rest:` для `configuration.yaml` (опитування раз на 15 с, `binary_sensor.adabox_online`, сенсори версії, статусу, треку, режиму, гучності, підсвітки, RSSI).
     - `adabox_maintenance_card.yaml`: окрема вкладка для дашборду `/home-maintenance/adabox` («Плеєр AdaBox», іконка `mdi:music-box`).
     - `README.md`: інструкція підключення.
+  - **Zero Database Flooding Invariant:** RSSI Wi-Fi виключено з атрибутів `sensor.adabox_firmware_version` та додано до `recorder: exclude: entities: sensor.adabox_wi_fi_rssi`, щоб дрижання сигналу (±1 dBm кожні 15 с) не засмічувало SQLite базу даних HA.
   - Жива конфігурація додана до `/volume1/docker/homeassistant/config/configuration.yaml` на Synology NAS та Lovelace дашборду `home-maintenance`. Перезавантажується через REST API: `POST /api/services/rest/reload`.
 
 ## Керування
