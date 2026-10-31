@@ -1,0 +1,65 @@
+# Lovelace Dashboard View / Cards for AdaBox
+# Used in Home Maintenance Dashboard (/home-maintenance/adabox)
+
+title: "Плеєр AdaBox"
+path: "adabox"
+icon: "mdi:music-box"
+cards:
+  - type: "custom:stack-in-card"
+    title: "AdaBox — Розумний музичний плеєр"
+    cards:
+      - type: "entities"
+        show_header_toggle: false
+        entities:
+          - entity: "binary_sensor.adabox_online"
+            name: "Мережевий статус"
+          - entity: "sensor.adabox_firmware_version"
+            name: "Версія прошивки"
+          - entity: "sensor.adabox_status"
+            name: "Стан відтворення"
+          - entity: "sensor.adabox_mode"
+            name: "Поточний режим / папка"
+          - entity: "sensor.adabox_track"
+            name: "Номер треку"
+          - entity: "sensor.adabox_volume"
+            name: "Рівень гучності (2–14)"
+          - entity: "sensor.adabox_led_level"
+            name: "Яскравість підсвічування (0–10)"
+          - entity: "sensor.adabox_wi_fi_rssi"
+            name: "Рівень сигналу Wi-Fi"
+      - type: "horizontal-stack"
+        cards:
+          - type: "button"
+            name: "Веб-панель AdaBox"
+            icon: "mdi:web"
+            tap_action:
+              action: "url"
+              url_path: "http://adabox.lan/"
+          - type: "button"
+            name: "Оновлення прошивки (OTA)"
+            icon: "mdi:cloud-upload"
+            tap_action:
+              action: "url"
+              url_path: "http://adabox.lan/update"
+
+  - type: "custom:stack-in-card"
+    title: "Технічний огляд та обслуговування"
+    cards:
+      - type: "markdown"
+        content: |
+          ### 📻 Архітектура та компоненти
+          - **Мікроконтролер:** ESP32-WROOM-32 (Wi-Fi, Bluetooth, NVS, OTA).
+          - **Аудіочіп:** DY-SV5W (UART, апаратний ЦАП/підсилювач 5W, читання MicroSD FAT32).
+          - **RFID модуль:** RC522 (SPI) для розпізнавання карток казок.
+          - **Індикація:** Кільце з 16 адресних світлодіодів WS2812B (палітра 10 кольорів по 16 треків, індикація гучності та яскравості).
+          - **Органи керування:** Інкрементальний енкодер EC11 з кнопкою + 3 тактові кнопки (Play/Pause, Next, Prev).
+
+          ### 📂 Структура MicroSD карти
+          - `/MUSIC/` — загальні пісні (`00001.mp3`..`00021.mp3`), вибір енкодером або кнопками.
+          - `/OTHER/` — казки та оповідання, прив'язані до RFID-міток. При зупинці позиція автоматично зберігається в пам'ять ESP32 кожні 5 секунд і відновлюється при наступному піднесенні картки.
+
+          ### 🎛️ Гарячі комбінації та енергозбереження
+          - 🔊 **Регулювання гучності:** Поворот енкодера (діапазон від 2 до 14).
+          - 💡 **Яскравість світлодіодів:** Затиснути кнопку енкодера та повертати (0 = підсвічування вимкнено, 1..10).
+          - 💤 **Автовимкнення (глибокий сон):** Плеєр автоматично переходить у глибокий сон через **10 хвилин бездіяльності** (коли музика не грає). Пробудження — коротким натисканням кнопки **Play**.
+          - 🔄 **Повне скидання до заводських налаштувань:** Одночасно затиснути всі 3 кнопки (**Play + Next + Prev**) та утримувати **15 секунд**. Всі налаштування Wi-Fi та NVS будуть очищені.

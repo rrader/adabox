@@ -110,7 +110,21 @@ Set the module to **UART control mode**: CON3=1, CON2=0, CON1=0.
 
 ## Saved state (NVS)
 
-Survives power-off and re-flashing (as long as "Erase All Flash" is off and the partition scheme is unchanged): last mode, last track per mode, volume, LED level, and the playback position of every OTHER track (resume point). After 10 minutes of inactivity the ESP32 enters deep sleep; press Play to wake it.
+Survives power-off and re-flashing (as long as "Erase All Flash" is off and the partition scheme is unchanged): last mode, last track per mode, volume, LED level, Wi-Fi credentials, and the playback position of every OTHER track (resume point). After 10 minutes of inactivity the ESP32 enters deep sleep; press Play to wake it.
+
+## Wi-Fi, Web UI & OTA Updates
+
+AdaBox includes Wi-Fi support with a captive portal for setup without hardcoded credentials:
+- **Captive Portal:** If no Wi-Fi credentials are stored, AdaBox starts a Wi-Fi hotspot `AdaBox-Setup` (192.168.4.1) with a captive portal to select and save Wi-Fi network details into NVS.
+- **Web UI:** Accessible on the local network at `http://adabox.lan/` (or `http://adabox.local/`) to view status, mode, track, volume, and LED level.
+- **JSON API:** `GET http://adabox.lan/info` returns pure JSON for home automation.
+- **OTA Updates:** Web-based firmware update page at `http://adabox.lan/update` and ArduinoOTA on port 3232.
+
+## Home Assistant Integration
+
+AdaBox integrates directly into Home Assistant via REST sensors and Lovelace maintenance cards:
+- Full setup instructions and configuration templates are located in [`home-assistant/`](home-assistant/).
+- Monitored entities: `binary_sensor.adabox_online`, `sensor.adabox_firmware_version`, `sensor.adabox_status`, `sensor.adabox_mode`, `sensor.adabox_track`, `sensor.adabox_volume`, `sensor.adabox_led_level`, and `sensor.adabox_wi_fi_rssi`.
 
 ## Flashing
 

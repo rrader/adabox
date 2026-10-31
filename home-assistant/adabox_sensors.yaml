@@ -1,0 +1,52 @@
+# Home Assistant REST Integration for AdaBox (Jukebox) ESP32 Player
+# Add this block to your Home Assistant configuration.yaml under `rest:`
+
+rest:
+  - resource: http://adabox.lan/info
+    scan_interval: 15
+    binary_sensor:
+      - name: "AdaBox Online"
+        unique_id: adabox_online
+        device_class: connectivity
+        value_template: "{{ value_json.name == 'adabox' }}"
+        icon: mdi:wifi-check
+    sensor:
+      - name: "AdaBox Firmware Version"
+        unique_id: adabox_firmware_version
+        value_template: "{{ value_json.version }}"
+        icon: mdi:chip
+        json_attributes:
+          - version
+          - status
+          - mode
+          - track
+          - volume
+          - led
+          - rssi
+          - ip
+      - name: "AdaBox Status"
+        unique_id: adabox_status
+        value_template: "{{ value_json.status | title }}"
+        icon: mdi:music-box
+      - name: "AdaBox Mode"
+        unique_id: adabox_mode
+        value_template: "{{ value_json.mode }}"
+        icon: mdi:folder-music
+      - name: "AdaBox Track"
+        unique_id: adabox_track
+        value_template: "{{ value_json.track }}"
+        icon: mdi:music-note
+      - name: "AdaBox Volume"
+        unique_id: adabox_volume
+        value_template: "{{ value_json.volume }}"
+        icon: mdi:volume-high
+      - name: "AdaBox LED Level"
+        unique_id: adabox_led_level
+        value_template: "{{ value_json.led }}"
+        icon: mdi:brightness-6
+      - name: "AdaBox Wi-Fi RSSI"
+        unique_id: adabox_wifi_rssi
+        value_template: "{{ value_json.rssi }}"
+        unit_of_measurement: "dBm"
+        device_class: signal_strength
+        icon: mdi:wifi

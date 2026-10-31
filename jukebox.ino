@@ -43,6 +43,16 @@ struct Btn {
 #include <Preferences.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <WiFi.h>
+#include <DNSServer.h>
+#include <WebServer.h>
+#include <ArduinoOTA.h>
+#include <ESPmDNS.h>
+
+#define FW_VERSION  "2.1.0"
+#define DEVICE_NAME "adabox"
+#define AP_SSID     "AdaBox-Setup"
+
 
 // ── Pin map ──────────────────────────────────────────────────────────────────
 #define PIN_TX 17   // to DY-SV5W RXD
@@ -79,6 +89,23 @@ struct Btn {
 // ── State ────────────────────────────────────────────────────────────────────
 CRGB leds[NUM_LEDS];
 
+Preferences prefs;
+int savedVolume = -1;
+uint32_t volumeChangedAt = 0;
+#define VOLUME_SAVE_DELAY_MS 2000
+
+int ledLevel = LED_LEVEL_DEFAULT;
+int savedLedLevel = -1;
+uint32_t ledLevelChangedAt = 0;
+
+int savedMusicTrack = -1, savedRfidTrack = -1, savedBrowse = -1;
+
+WebServer server(80);
+DNSServer dnsServer;
+bool otaReady = false;
+bool apMode = false;
+bool wifiConnected = false;
+
 enum AnimMode { ANIM_BREATHE, ANIM_SPINNER, ANIM_SWEEP_CW, ANIM_SWEEP_CCW, ANIM_FLASH, ANIM_SEEK, ANIM_PROGRAM, ANIM_PROGRAM_SUCCESS };
 AnimMode animMode = ANIM_BREATHE;
 AnimMode prevMode = ANIM_BREATHE;
@@ -107,13 +134,182 @@ bool prevHeldWithNext = false;
 bool inProgramMode = false;
 uint32_t programModeStart = 0;
 
+// ── Wi-Fi Captive Portal, WebServer & OTA ─────────────────────────────────────
+void setupOTA() {
+  ArduinoOTA.setHostname(DEVICE_NAME);
+  ArduinoOTA.onStart([]() {
+    Serial.println("[OTA] Firmware update started!");
+    playerStop();
+    fill_solid(leds, NUM_LEDS, CRGB::Blue);
+    FastLED.show();
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    int lit = (progress * NUM_LEDS) / total;
+    for (int i = 0; i < NUM_LEDS; i++)
+      leds[i] = (i <= lit) ? CRGB::Cyan : CRGB::Black;
+    FastLED.show();
+  });
+  ArduinoOTA.onEnd([]() {
+    fill_solid(leds, NUM_LEDS, CRGB::Green);
+    FastLED.show();
+    Serial.println("\n[OTA] Update complete! Rebooting...");
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("[OTA] Error[%u]\n", error);
+    fill_solid(leds, NUM_LEDS, CRGB::Red);
+    FastLED.show();
+  });
+  ArduinoOTA.begin();
+  otaReady = true;
+  Serial.print("[OTA] Ready at "); Serial.print(DEVICE_NAME); Serial.println(".local");
+}
+
+void setupWebServer() {
+  server.on("/", []() {
+    if (apMode) {
+      // Hotspot Wi-Fi Setup Form
+      String s = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
+      s += "<title>AdaBox Setup</title><style>";
+      s += "body{font-family:system-ui,-apple-system,sans-serif;background:#12121e;color:#fff;display:flex;justify-content:center;padding:20px;margin:0}";
+      s += ".card{background:#1e1e2f;padding:24px;border-radius:14px;max-width:340px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,0.5)}";
+      s += "h2{color:#e0457a;margin:0 0 8px 0;font-size:20px}p{color:#aaa;font-size:13px;margin:0 0 16px 0}";
+      s += "label{display:block;font-size:12px;color:#888;margin-bottom:6px}";
+      s += "input,select{width:100%;padding:10px;margin-bottom:14px;background:#2b2b3d;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box}";
+      s += "button{width:100%;padding:12px;background:#e0457a;border:none;border-radius:8px;color:#fff;font-weight:600;font-size:15px;cursor:pointer}";
+      s += "</style></head><body><div class='card'>";
+      s += "<h2>📻 AdaBox Setup</h2><p>Connect your music box to home Wi-Fi (v" FW_VERSION "):</p>";
+      s += "<form method='POST' action='/save'>";
+      s += "<label>Wi-Fi Network (SSID):</label>";
+      s += "<select name='ssid'>";
+      int n = WiFi.scanNetworks();
+      for (int i = 0; i < n; ++i) {
+        String net = WiFi.SSID(i);
+        s += "<option value='" + net + "'>" + net + " (" + String(WiFi.RSSI(i)) + "dBm)</option>";
+      }
+      s += "</select>";
+      s += "<label>Or type manually:</label><input type='text' name='manual_ssid' placeholder='Network name'>";
+      s += "<label>Wi-Fi Password:</label><input type='password' name='pass' placeholder='Password'>";
+      s += "<button type='submit'>Save & Connect</button></form></div></body></html>";
+      server.send(200, "text/html", s);
+    } else {
+      // Normal Dashboard
+      String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
+      html += "<title>AdaBox</title><style>body{font-family:sans-serif;background:#181824;color:#eee;padding:24px;text-align:center}";
+      html += ".card{background:#222234;max-width:320px;margin:0 auto;padding:20px;border-radius:12px;border:1px solid #333}";
+      html += "h1{color:#e0457a;font-size:22px;margin:0 0 10px 0}.badge{background:#2d4a22;color:#7ee787;padding:4px 8px;border-radius:6px;font-size:12px}";
+      html += "p{margin:10px 0;font-size:14px}.btn{display:inline-block;margin-top:14px;color:#ff8080;text-decoration:none;font-size:12px}</style></head>";
+      html += "<body><div class='card'><h1>📻 AdaBox</h1><p><span class='badge'>v" FW_VERSION " Online</span></p>";
+      html += "<p>Mode: <b>" + String(browseMode == BROWSE_MUSIC ? "MUSIC" : "OTHER") + "</b></p>";
+      html += "<p>Track: <b>#" + String(browseMode == BROWSE_MUSIC ? musicTrack : rfidTrack) + "</b> (" + String(isPlaying ? "Playing ▶" : "Stopped ⏹") + ")</p>";
+      html += "<p>Volume: <b>" + String(currentVolume) + "</b> / " + String(VOLUME_MAX) + "</p>";
+      html += "<p>LED Level: <b>" + String(ledLevel) + "</b> / 10</p>";
+      html += "<p><a href='/reset-wifi' class='btn' >⚠ Reset Wi-Fi</a></p>";
+      html += "</div></body></html>";
+      server.send(200, "text/html", html);
+    }
+  });
+
+  server.on("/save", HTTP_POST, []() {
+    String ssid = server.arg("manual_ssid");
+    if (ssid.length() == 0) ssid = server.arg("ssid");
+    String pass = server.arg("pass");
+    ssid.trim(); pass.trim();
+
+    prefs.begin("jukebox", false);
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", pass);
+    prefs.end();
+
+    String s = "<!DOCTYPE html><html><body style='background:#12121e;color:#7ee787;font-family:sans-serif;text-align:center;padding:40px;'>";
+    s += "<h2>✓ Credentials Saved!</h2><p style='color:#ccc'>Connecting to " + ssid + "... AdaBox is rebooting.</p></body></html>";
+    server.send(200, "text/html", s);
+    delay(1000);
+    ESP.restart();
+  });
+
+  server.on("/info", []() {
+    String json = "{\"name\":\"adabox\",\"version\":\"" FW_VERSION "\",";
+    json += "\"status\":\"" + String(isPlaying ? "playing" : "idle") + "\",";
+    json += "\"mode\":\"" + String(browseMode == BROWSE_MUSIC ? "MUSIC" : "OTHER") + "\",";
+    json += "\"track\":" + String(browseMode == BROWSE_MUSIC ? musicTrack : rfidTrack) + ",";
+    json += "\"volume\":" + String(currentVolume) + ",";
+    json += "\"led\":" + String(ledLevel) + ",";
+    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+    json += "\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+    server.send(200, "application/json", json);
+  });
+
+  server.on("/reset-wifi", []() {
+    prefs.begin("jukebox", false);
+    prefs.remove("wifi_ssid");
+    prefs.remove("wifi_pass");
+    prefs.end();
+    server.send(200, "text/html", "Wi-Fi reset. Rebooting to AdaBox-Setup hotspot...");
+    delay(1000);
+    ESP.restart();
+  });
+
+  server.onNotFound([]() {
+    if (apMode) {
+      server.sendHeader("Location", "http://192.168.4.1/", true);
+      server.send(302, "text/plain", "");
+    } else {
+      server.send(404, "text/plain", "Not Found");
+    }
+  });
+
+  server.begin();
+  Serial.println("[HTTP] Web server started.");
+}
+
+void startHotspot() {
+  apMode = true;
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID);
+  delay(100);
+  IPAddress apIP = WiFi.softAPIP();
+  dnsServer.start(53, "*", apIP);
+  setupWebServer();
+  Serial.print("[WiFi] Hotspot started: "); Serial.println(AP_SSID);
+  Serial.print("[WiFi] Connect and visit: http://"); Serial.println(apIP);
+}
+
+void wifiSetup() {
+  prefs.begin("jukebox", true);
+  String ssid = prefs.getString("wifi_ssid", "");
+  String pass = prefs.getString("wifi_pass", "");
+  prefs.end();
+
+  if (ssid.length() == 0) {
+    Serial.println("[WiFi] No saved credentials. Starting setup hotspot...");
+    startHotspot();
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname(DEVICE_NAME);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  Serial.print("[WiFi] Connecting to "); Serial.print(ssid);
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start < 12000)) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiConnected = true;
+    Serial.print("[WiFi] Connected! IP: "); Serial.println(WiFi.localIP());
+    setupOTA();
+    setupWebServer();
+  } else {
+    Serial.println("[WiFi] Connection failed. Starting fallback hotspot...");
+    startHotspot();
+  }
+}
+
 // ── Persistent state (NVS): last track per mode + last browse mode ──────────
-Preferences prefs;
-int savedMusicTrack = -1, savedRfidTrack = -1, savedBrowse = -1, savedVolume = -1;
-int ledLevel = LED_LEVEL_DEFAULT, savedLedLevel = -1;
-uint32_t ledLevelChangedAt = 0;
-uint32_t volumeChangedAt = 0;   // volume is saved 2 s after the last encoder tick
-#define VOLUME_SAVE_DELAY_MS 2000
 
 void loadState() {
   prefs.begin("jukebox", true);
@@ -236,6 +432,8 @@ void goToSleep() {
   Serial.println("[SLEEP] Idle timeout → deep sleep");
   saveStateIfChanged();
   playerStop();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
   FastLED.clear(true);
   digitalWrite(PIN_LED, LOW);
   // Wait until Play is released, otherwise we'd wake up immediately.
@@ -357,7 +555,10 @@ void setup() {
   rfidSetup();
 
   lastActivityMs = millis();
-  Serial.println("[Jukebox] Ready.");
+  wifiSetup();
+  Serial.print("[Jukebox] Version v");
+  Serial.print(FW_VERSION);
+  Serial.println(" Ready.");
 }
 
 void loop() {
@@ -608,4 +809,14 @@ void loop() {
 
   saveStateIfChanged();
   updateLEDs();
+
+  // ── WiFi, Captive Portal & OTA ──
+  if (apMode) {
+    dnsServer.processNextRequest();
+    server.handleClient();
+  } else if (WiFi.status() == WL_CONNECTED) {
+    if (!otaReady) setupOTA();
+    ArduinoOTA.handle();
+    server.handleClient();
+  }
 }
