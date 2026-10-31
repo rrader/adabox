@@ -22,7 +22,6 @@ rest:
           - track
           - volume
           - led
-          - rssi
           - ip
       - name: "AdaBox Status"
         unique_id: adabox_status

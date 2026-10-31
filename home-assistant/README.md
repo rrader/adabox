@@ -28,11 +28,19 @@
 ## 🛠️ Підключення сенсорів у `configuration.yaml`
 
 1. Додайте вміст файлу [`adabox_sensors.yaml`](adabox_sensors.yaml) до вашого `configuration.yaml` у секцію `rest:`.
-2. Перевірте конфігурацію:
+2. Щоб запобігти флуду бази даних SQLite Home Assistant (флуктуація сигналу Wi-Fi RSSI на 1–2 dBm кожні 15 с), обов'язково додайте `sensor.adabox_wi_fi_rssi` до виключень рекордера (`recorder: exclude: entities:`):
+   ```yaml
+   recorder:
+     exclude:
+       entities:
+         - sensor.adabox_wi_fi_rssi
+   ```
+   Це дозволяє бачити рівень сигналу наживо в інтерфейсі, але не записувати кожне мікроколивання на диск. `rssi` також навмисно виключено з `json_attributes` сенсора прошивки, тому пристрій у режимі очікування генерує рівно **0** записів у базу даних.
+3. Перевірте конфігурацію:
    ```bash
    ha_ctl.py check-config
    ```
-3. Перезавантажте REST сутності без рестарту всього HA:
+4. Перезавантажте REST сутності без рестарту всього HA:
    ```bash
    curl -s -X POST -H "Authorization: Bearer $HA_TOKEN" "$HA_URL/api/services/rest/reload"
    ```
