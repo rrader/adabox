@@ -37,7 +37,26 @@ ESP32 devkit (Keyestudio ESP32-WROOM-32D), DY-SV5W (TF до 32 ГБ, динам�
 | RC522 SCK / MISO / MOSI / SS / RST | 25 / 26 / 27 / 5 / 22 |
 
 DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9600 8N1.
-Залежності Arduino IDE: плата **ESP32 Dev Module**, бібліотеки **FastLED ≥ 3.6**, **MFRC522**; `Preferences` — вбудована в ESP32 core. Прошивка: `scripts/flash.sh build|upload [port]` (arduino-cli з Arduino IDE, збирає на місці; головний файл скетча називається `jukebox.ino`, щоб збігатися з назвою папки `jukebox` (вимога Arduino); FQBN `esp32:esp32:esp32`, ESP32 core 3.3.8, FastLED/MFRC522 вже встановлені). Плата Романа: ESP32-D0WD-V3 rev 3.1, 4 МБ флеш, USB-міст CP2102 (`/dev/cu.usbserial-0001`), MAC 30:76:f5:ee:bc:04; `esptool` є в brew. Лог плати: `scripts/serial_log.py [секунди] [порт]` (ресет по RTS + читання UART 115200; python із esptool, бо в системному немає pyserial). Очікуваний boot-лог: `[Query MUSIC] … tracks: 14`, `OTHER tracks: 5`, `Restored: vol=… mode=…`, `[RFID] Boot test: version 0x92 — SPI communication OK`, `Ready`. Прошито й перевірено 2026-10-31. Збірка: ~411 КБ (31%) флеш, 24 КБ RAM. Не змінювати Partition Scheme / не вмикати Erase All Flash — інакше стирається NVS.
+Залежності Arduino IDE: плата **ESP32 Dev Module**, бібліотеки **FastLED ≥ 3.6**, **MFRC522**; `Preferences` — вбудована в ESP32 core. Прошивка: `scripts/flash.sh build|upload [port]|ota [ip]` (arduino-cli з Arduino IDE, збирає на місці; головний файл скетча називається `jukebox.ino`, щоб збігатися з назвою папки `jukebox` (вимога Arduino); FQBN `esp32:esp32:esp32`, ESP32 core 3.3.8, FastLED/MFRC522 вже встановлені). Плата Романа: ESP32-D0WD-V3 rev 3.1, 4 МБ флеш, USB-міст CP2102 (`/dev/cu.usbserial-0001`), MAC 30:76:f5:ee:bc:04; `esptool` є в brew.
+
+## Мережа, Wi-Fi Captive Portal, OTA та Home Assistant
+
+- **Версія прошивки:** `v2.1.0` (`#define FW_VERSION "2.1.0"` у `jukebox.ino`).
+- **Wi-Fi Hotspot & Captive Portal:** Якщо в NVS немає креденшелів Wi-Fi, запускається точка доступу `AdaBox-Setup` (192.168.4.1) з DNS Captive Portal. Користувач обирає мережу або вводить вручну SSID і пароль, дані зберігаються в NVS (`prefs.putString("wifi_ssid", ...)`), плата перезавантажується та підключається до Wi-Fi. Паролі не хардкодяться в коді.
+- **Статичний IP та локальний домен на UniFi UDR7:**
+  - MAC-адреса: `30:76:f5:ee:bc:04`.
+  - Фіксований DHCP IP: `192.168.1.88` (`AdaBox`).
+  - Локальний домен: `adabox.lan` (також `adabox` і mDNS `adabox.local`), налаштовано у `/run/dnsmasq.dhcp.conf.d/adabox.conf` на UDR7. Не резолвити через `*.rmn.pp.ua`, щоб не потрапляти у проксі Cloudflare.
+- **Веб-інтерфейс та API:**
+  - Головна сторінка: `http://adabox.lan/` — статус, поточний режим, трек, гучність, LED, посилання на OTA.
+  - JSON API: `http://adabox.lan/info` — повертає `{"name":"adabox","version":"2.1.0","status":"idle","mode":"OTHER","track":1,"volume":12,"led":10,"rssi":-71,"ip":"192.168.1.88"}` для автоматизації.
+  - Оновлення прошивки: Веб-форма `http://adabox.lan/update` та ArduinoOTA (порт 3232, `adabox.local`).
+- **Інтеграція в Home Assistant:**
+  - Файли інтеграції збережено в `projects/jukebox/home-assistant/`:
+    - `adabox_sensors.yaml`: блок `rest:` для `configuration.yaml` (опитування раз на 15 с, `binary_sensor.adabox_online`, сенсори версії, статусу, треку, режиму, гучності, підсвітки, RSSI).
+    - `adabox_maintenance_card.yaml`: окрема вкладка для дашборду `/home-maintenance/adabox` («Плеєр AdaBox», іконка `mdi:music-box`).
+    - `README.md`: інструкція підключення.
+  - Жива конфігурація додана до `/volume1/docker/homeassistant/config/configuration.yaml` на Synology NAS та Lovelace дашборду `home-maintenance`. Перезавантажується через REST API: `POST /api/services/rest/reload`.
 
 ## Керування
 
