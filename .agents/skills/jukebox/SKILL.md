@@ -2,7 +2,7 @@
 name: jukebox
 description: >-
   Повний довідник по плеєру AdaBox/Jukebox (ESP32 + DY-SV5W + RC522 + WS2812, репозиторій rrader/adabox, projects/jukebox):
-  залізо й розпіновка, прошивка (Jukebox.ino, player/rfid/leds/encoder), керування кнопками й енкодером, RFID-картки,
+  залізо й розпіновка, прошивка (jukebox.ino, player/rfid/leds/encoder), керування кнопками й енкодером, RFID-картки,
   збережений стан (NVS), гучність, структура SD (MUSIC/OTHER), sd-manager.html для заливки музики, пошук і завантаження MP3
   (download_track.py), нотатки в Obsidian. Використовувати для будь-яких запитів про Jukebox/AdaBox: зміни прошивки,
   налагодження, підготовка SD-карти, пошук пісень і казок.
@@ -17,7 +17,7 @@ description: >-
 | Що | Де |
 |---|---|
 | Репозиторій | `projects/jukebox` → `git@github-personal:rrader/adabox.git` (див. pre-push checklist у GEMINI.md) |
-| Прошивка | `Jukebox.ino` (main), `player.ino` (UART DY-SV5W), `rfid.ino`, `leds.ino`, `encoder.ino` — один скетч Arduino, файли склеюються IDE |
+| Прошивка | `jukebox.ino` (main), `player.ino` (UART DY-SV5W), `rfid.ino`, `leds.ino`, `encoder.ino` — один скетч Arduino, файли склеюються IDE |
 | README | `README.md` (залізо, розпіновка, SD, LED); datasheet модуля: `DY-SV5W-3.md/.pdf` |
 | SD-менеджер | `sd-manager.html` |
 | Завантаження MP3 | `scripts/download_track.py`, вихід у `mp3/` (gitignored) |
@@ -32,12 +32,12 @@ ESP32 devkit (Keyestudio ESP32-WROOM-32D), DY-SV5W (TF до 32 ГБ, динам�
 |---|---|
 | DY-SV5W RXD / TXD / BUSY | 17 (TX2) / 16 (RX2) / 15 (BUSY LOW = грає) |
 | WS2812 DATA | 4 |
-| Кнопка Play/Stop / Next / Prev | 12 / 14 / 13 (INPUT_PULLUP → GND) *(у `Jukebox.ino` реально Next=14, Prev=13; README у цій частині застарілий)* |
+| Кнопка Play/Stop / Next / Prev | 12 / 14 / 13 (INPUT_PULLUP → GND) *(Next=14, Prev=13, README узгоджено з прошивкою)* |
 | Енкодер CLK / DT | 18 / 19 (SW не використовується) |
 | RC522 SCK / MISO / MOSI / SS / RST | 25 / 26 / 27 / 5 / 22 |
 
 DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9600 8N1.
-Залежності Arduino IDE: плата **ESP32 Dev Module**, бібліотеки **FastLED ≥ 3.6**, **MFRC522**; `Preferences` — вбудована в ESP32 core. Прошивка: `scripts/flash.sh build|upload [port]` (arduino-cli з Arduino IDE, збирає з тимчасової копії, бо папка скетча має називатися `Jukebox`; FQBN `esp32:esp32:esp32`, ESP32 core 3.3.8, FastLED/MFRC522 вже встановлені). Плата Романа: ESP32-D0WD-V3 rev 3.1, 4 МБ флеш, USB-міст CP2102 (`/dev/cu.usbserial-0001`), MAC 30:76:f5:ee:bc:04; `esptool` є в brew. Збірка: ~411 КБ (31%) флеш, 24 КБ RAM. Не змінювати Partition Scheme / не вмикати Erase All Flash — інакше стирається NVS.
+Залежності Arduino IDE: плата **ESP32 Dev Module**, бібліотеки **FastLED ≥ 3.6**, **MFRC522**; `Preferences` — вбудована в ESP32 core. Прошивка: `scripts/flash.sh build|upload [port]` (arduino-cli з Arduino IDE, збирає на місці; головний файл скетча називається `jukebox.ino`, щоб збігатися з назвою папки `jukebox` (вимога Arduino); FQBN `esp32:esp32:esp32`, ESP32 core 3.3.8, FastLED/MFRC522 вже встановлені). Плата Романа: ESP32-D0WD-V3 rev 3.1, 4 МБ флеш, USB-міст CP2102 (`/dev/cu.usbserial-0001`), MAC 30:76:f5:ee:bc:04; `esptool` є в brew. Збірка: ~411 КБ (31%) флеш, 24 КБ RAM. Не змінювати Partition Scheme / не вмикати Erase All Flash — інакше стирається NVS.
 
 ## Керування
 
@@ -51,7 +51,7 @@ DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9
 - **RFID**: картка зберігає **повний шлях** (32 байти; MIFARE Classic і NTAG), не номер треку, тому карти не ламаються при перестановці — лише при перейменуванні файлів. Повторне прикладання картки того ж треку, що вже грає, ігнорується.
 - **Режими**: `MUSIC` — автоперехід на наступний трек після завершення (BUSY-детекція, 200 мс), яскравість LED 90; `OTHER` (казки) — без автопереходу, яскравість 35 під час відтворення.
 
-## Константи та стан (Jukebox.ino)
+## Константи та стан (jukebox.ino)
 
 - Гучність: `VOLUME_MIN 2`, `VOLUME_MAX 14` (шкала модуля 0–30; було 21, зменшено в 1.5 раза), `VOLUME_DEFAULT 8`. Гучність зберігається (ключ `vol`) через 2 с після останнього тіку енкодера.
 - **Збережений стан (NVS, namespace `jukebox`)**: ключі `music`, `rfid` (останній трек кожного режиму), `vol`, `led` (рівень яскравості) і `mode` (0=MUSIC, 1=OTHER). `loadState()` після підрахунку треків у `setup()` (обмежує номер кількістю файлів), `saveStateIfChanged()` в кінці `loop()` пише у флеш лише при зміні. Після вмикання плеєр стоїть; Play грає збережений трек.

@@ -86,7 +86,7 @@ No library needed for the DY-SV5W — it speaks raw UART at 9600 baud, handled d
 1. Add ESP32 board support: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
 2. Board: **ESP32 Dev Module** (or your specific variant)
 3. Install **FastLED** via Library Manager
-4. Upload `Jukebox.ino`
+4. Upload `jukebox.ino`
 
 ## DY-SV5W DIP switch
 
@@ -115,4 +115,4 @@ Survives power-off and re-flashing (as long as "Erase All Flash" is off and the 
 
 ## Adjusting volume
 
-Limits and default are `VOLUME_MIN`, `VOLUME_MAX`, `VOLUME_DEFAULT` in `Jukebox.ino` (the last used volume is restored on boot).
+Limits and default are `VOLUME_MIN`, `VOLUME_MAX`, `VOLUME_DEFAULT` in `jukebox.ino` (the last used volume is restored on boot).
