@@ -40,6 +40,9 @@ struct Btn {
 #include <FastLED.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Preferences.h>
+#include <driver/rtc_io.h>
+#include <esp_sleep.h>
 
 // ── Pin map ──────────────────────────────────────────────────────────────────
 #define PIN_TX 17   // to DY-SV5W RXD
@@ -56,10 +59,16 @@ struct Btn {
 #define MUSIC_FOLDER "MUSIC"
 #define RFID_FOLDER  "OTHER"
 #define DEBOUNCE_MS 50
-#define LED_BRIGHTNESS       90  // MUSIC mode
-#define LED_BRIGHTNESS_OTHER 35  // OTHER mode — dim and relaxing
-#define VOLUME_MAX     21  // ~70% of the 0-30 scale
-#define VOLUME_DEFAULT 15
+#define LED_BRIGHTNESS       90  // MUSIC mode, at max level
+#define LED_BRIGHTNESS_OTHER 35  // OTHER mode — dim and relaxing, at max level
+#define LED_LEVEL_MIN     0      // user brightness level: base * level / LED_LEVEL_MAX (0 = LEDs off)
+#define LED_LEVEL_MAX     10     // (10 → 1.0x = the base values above, 1 → 0.1x, 0 → off)
+#define LED_LEVEL_DEFAULT LED_LEVEL_MAX
+#define VOLUME_MAX     14  // 21 / 1.5 (~47% of the 0-30 scale)
+#define VOLUME_MIN     2
+#define VOLUME_DEFAULT 8
+#define IDLE_SLEEP_MS (10UL * 60UL * 1000UL) // deep sleep after 10 min of inactivity
+#define FACTORY_RESET_MS 15000   // all 3 buttons held this long → wipe saved state
 #define SEEK_SECONDS 5   // seconds per encoder tick in seek mode
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -93,6 +102,146 @@ bool prevHeldWithNext = false;
 bool inProgramMode = false;
 uint32_t programModeStart = 0;
 
+// ── Persistent state (NVS): last track per mode + last browse mode ──────────
+Preferences prefs;
+int savedMusicTrack = -1, savedRfidTrack = -1, savedBrowse = -1, savedVolume = -1;
+int ledLevel = LED_LEVEL_DEFAULT, savedLedLevel = -1;
+uint32_t ledLevelChangedAt = 0;
+uint32_t volumeChangedAt = 0;   // volume is saved 2 s after the last encoder tick
+#define VOLUME_SAVE_DELAY_MS 2000
+
+void loadState() {
+  prefs.begin("jukebox", true);
+  musicTrack = prefs.getInt("music", 1);
+  rfidTrack  = prefs.getInt("rfid", 1);
+  browseMode = prefs.getInt("mode", 0) ? BROWSE_RFID : BROWSE_MUSIC;
+  currentVolume = constrain(prefs.getInt("vol", VOLUME_DEFAULT), VOLUME_MIN, VOLUME_MAX);
+  prefs.end();
+  ledLevel = constrain(prefs.getInt("led", LED_LEVEL_DEFAULT), LED_LEVEL_MIN, LED_LEVEL_MAX);
+  savedVolume = currentVolume;
+  savedLedLevel = ledLevel;
+  if (musicTrack < 1 || musicTrack > totalMusicTracks) musicTrack = 1;
+  if (rfidTrack  < 1 || rfidTrack  > totalRfidTracks)  rfidTrack  = 1;
+  savedMusicTrack = musicTrack;
+  savedRfidTrack = rfidTrack;
+  savedBrowse = (browseMode == BROWSE_RFID);
+}
+
+// Writes to flash only when something actually changed.
+void saveStateIfChanged() {
+  int b = (browseMode == BROWSE_RFID);
+  bool volDirty = currentVolume != savedVolume &&
+                  millis() - volumeChangedAt >= VOLUME_SAVE_DELAY_MS;
+  bool ledDirty = ledLevel != savedLedLevel &&
+                  millis() - ledLevelChangedAt >= VOLUME_SAVE_DELAY_MS;
+  if (musicTrack == savedMusicTrack && rfidTrack == savedRfidTrack && b == savedBrowse && !volDirty && !ledDirty) return;
+  prefs.begin("jukebox", false);
+  if (ledDirty) { prefs.putInt("led", ledLevel); savedLedLevel = ledLevel; }
+  if (volDirty) { prefs.putInt("vol", currentVolume); savedVolume = currentVolume; }
+  prefs.putInt("music", musicTrack);
+  prefs.putInt("rfid", rfidTrack);
+  prefs.putInt("mode", b);
+  prefs.end();
+  savedMusicTrack = musicTrack; savedRfidTrack = rfidTrack; savedBrowse = b;
+}
+
+// ── OTHER-mode resume position ───────────────────────────────────────────────
+// The DY-SV5W cannot report the playback time, so we count it ourselves
+// (wall-clock while playing, adjusted by seeks) and store it per OTHER track
+// in NVS (key "p<N>", seconds). Play button / card tap resumes via seek.
+#define POS_SAVE_EVERY_MS 15000
+#define PREV_RESTART_S    10    // PREV after this many seconds restarts the track
+#define POS_MIN_RESUME_S  5     // below this → start from the beginning
+int      otherPlaying   = 0;    // OTHER track number being tracked (0 = none)
+int32_t  posBaseMs      = 0;    // position at posStartMs
+uint32_t posStartMs     = 0;
+uint32_t lastPosSaveMs  = 0;
+
+int currentPosSec() {
+  int32_t ms = posBaseMs + (int32_t)(millis() - posStartMs);
+  return ms < 0 ? 0 : ms / 1000;
+}
+
+void savePos(int track, int sec) {
+  char key[8];
+  snprintf(key, sizeof(key), "p%d", track);
+  prefs.begin("jukebox", false);
+  prefs.putInt(key, sec);
+  prefs.end();
+}
+
+int loadPos(int track) {
+  char key[8];
+  snprintf(key, sizeof(key), "p%d", track);
+  prefs.begin("jukebox", true);
+  int v = prefs.getInt(key, 0);
+  prefs.end();
+  return v;
+}
+
+// Call right after the OTHER track started playing from the beginning.
+// resume=true → seek to the saved position.
+void trackOther(int track, bool resume) {
+  int sec = resume ? loadPos(track) : 0;
+  if (sec < POS_MIN_RESUME_S) sec = 0;
+  if (sec > 0) {
+    delay(300);               // let the module start the file first
+    playerSeek(sec);
+    Serial.print("[POS] Resume OTHER track "); Serial.print(track);
+    Serial.print(" at "); Serial.print(sec); Serial.println("s");
+  }
+  otherPlaying = track;
+  posBaseMs = (int32_t)sec * 1000;
+  posStartMs = millis();
+  lastPosSaveMs = millis();
+}
+
+// Stop tracking; keepPos=false clears the saved position (track finished).
+void untrackOther(bool keepPos) {
+  if (otherPlaying > 0) savePos(otherPlaying, keepPos ? currentPosSec() : 0);
+  otherPlaying = 0;
+}
+
+// ── Factory reset ────────────────────────────────────────────────────────────
+// Erases the whole "jukebox" NVS namespace (tracks, mode, volume, LED level,
+// OTHER positions), blinks the ring red regardless of the LED level, reboots.
+void factoryReset() {
+  Serial.println("[RESET] Erasing saved state");
+  playerStop();
+  prefs.begin("jukebox", false);
+  prefs.clear();
+  prefs.end();
+  FastLED.setBrightness(255);
+  for (int i = 0; i < 6; i++) {
+    fill_solid(leds, NUM_LEDS, i % 2 == 0 ? CRGB::Red : CRGB::Black);
+    FastLED.show();
+    delay(250);
+  }
+  ESP.restart();
+}
+
+// ── Auto power-off (deep sleep) ──────────────────────────────────────────────
+// Idle = not playing and no button / encoder / card activity for IDLE_SLEEP_MS.
+// Wake-up: Play button (GPIO 12 → LOW). The ESP32 reboots, state is restored
+// from NVS. ext0 is the only wake source usable with an active-LOW button
+// (ext1 ANY_LOW is unsupported on the original ESP32).
+uint32_t lastActivityMs = 0;
+
+void goToSleep() {
+  Serial.println("[SLEEP] Idle timeout → deep sleep");
+  saveStateIfChanged();
+  playerStop();
+  FastLED.clear(true);
+  digitalWrite(PIN_LED, LOW);
+  // Wait until Play is released, otherwise we'd wake up immediately.
+  while (digitalRead(PIN_BTN_PLAY) == LOW) delay(10);
+  rtc_gpio_pullup_en(GPIO_NUM_12);
+  rtc_gpio_pulldown_dis(GPIO_NUM_12);
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0);
+  Serial.flush();
+  esp_deep_sleep_start();
+}
+
 // FNV-1a hash — used to derive a stable seed from an RFID card's path.
 uint32_t hashPath(const char *s) {
   uint32_t h = 2166136261u;
@@ -104,9 +253,8 @@ uint32_t hashPath(const char *s) {
 }
 
 void applyBrightness() {
-  FastLED.setBrightness(
-    isPlaying && playContext == CTX_RFID ? LED_BRIGHTNESS_OTHER : LED_BRIGHTNESS
-  );
+  int base = isPlaying && playContext == CTX_RFID ? LED_BRIGHTNESS_OTHER : LED_BRIGHTNESS;
+  FastLED.setBrightness(constrain(base * ledLevel / LED_LEVEL_MAX, 0, 255));
 }
 
 // ── Button ───────────────────────────────────────────────────────────────────
@@ -149,11 +297,13 @@ void checkTrackEnd() {
       Serial.print("[BUSY] Track ended → auto-advance to MUSIC track ");
       Serial.println(musicTrack);
       playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+      otherPlaying = 0;
       isPlaying = true;
       applyBrightness();
       randomizeSpinner(musicTrack);
       animMode = ANIM_SPINNER;
     } else {
+      if (otherPlaying > 0) untrackOther(false); // finished → start over next time
       applyBrightness(); // restore brightness after RFID track ends
     }
   }
@@ -186,8 +336,21 @@ void setup() {
   Serial.print("[Jukebox] RFID tracks: ");
   Serial.println(totalRfidTracks);
 
+  loadState();
+  playerVolume(currentVolume); // apply restored volume
+  applyBrightness();           // apply restored LED brightness
+  Serial.print("[Jukebox] Restored: vol=");
+  Serial.print(currentVolume);
+  Serial.print(" mode=");
+  Serial.print(browseMode == BROWSE_MUSIC ? "MUSIC" : "OTHER");
+  Serial.print(" music=");
+  Serial.print(musicTrack);
+  Serial.print(" other=");
+  Serial.println(rfidTrack);
+
   rfidSetup();
 
+  lastActivityMs = millis();
   Serial.println("[Jukebox] Ready.");
 }
 
@@ -195,20 +358,29 @@ void loop() {
   // ── Encoder ──
   int delta = drainEncoder();
   if (delta != 0) {
-    if (btnPlay.state == LOW) {
+    if (btnPrev.state == LOW) {
+      // PREV held + encoder → LED brightness (suppresses the PREV action on release)
+      prevHeldWithNext = true;
+      ledLevel = constrain(ledLevel + delta, LED_LEVEL_MIN, LED_LEVEL_MAX);
+      Serial.print("[ENC] LED level → "); Serial.println(ledLevel);
+      ledLevelChangedAt = millis();
+      applyBrightness();
+    } else if (btnPlay.state == LOW) {
       int secs = delta * SEEK_SECONDS;
       Serial.print("[ENC] Seek ");
       Serial.print(secs > 0 ? "+" : "");
       Serial.print(secs);
       Serial.println("s");
       playerSeek(secs);
+      if (otherPlaying > 0) posBaseMs += (int32_t)secs * 1000; // keep our counter in sync
       stepSeekSweep(delta > 0);
       seekUsed = true;
     } else {
-      currentVolume = constrain(currentVolume + delta, 0, VOLUME_MAX);
+      currentVolume = constrain(currentVolume + delta, VOLUME_MIN, VOLUME_MAX);
       Serial.print("[ENC] Volume → ");
       Serial.println(currentVolume);
       playerVolume(currentVolume);
+      volumeChangedAt = millis();
     }
   }
 
@@ -225,6 +397,7 @@ void loop() {
     if (isPlaying) {
       Serial.println("[BTN] PLAY → Stop");
       playerStop();
+      untrackOther(true);
       isPlaying = false;
       prevBusy = false;
       animMode = ANIM_BREATHE;
@@ -238,12 +411,14 @@ void loop() {
         playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
         playContext = CTX_MUSIC;
         spinSeed = musicTrack;
+        otherPlaying = 0;
       } else {
         Serial.print("[BTN] PLAY → RFID track ");
         Serial.println(rfidTrack);
         playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
         playContext = CTX_RFID;
         spinSeed = rfidTrack;
+        trackOther(rfidTrack, true);
       }
       isPlaying = true;
       applyBrightness();
@@ -276,14 +451,17 @@ void loop() {
       musicTrack = (musicTrack % totalMusicTracks) + 1;
       Serial.print("[BTN] NEXT → MUSIC track "); Serial.println(musicTrack);
       playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+      untrackOther(true);
       playContext = CTX_MUSIC;
       spinSeed = musicTrack;
     } else {
+      untrackOther(true);
       rfidTrack = (rfidTrack % totalRfidTracks) + 1;
       Serial.print("[BTN] NEXT → RFID track "); Serial.println(rfidTrack);
       playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
       playContext = CTX_RFID;
       spinSeed = rfidTrack;
+      trackOther(rfidTrack, true);
     }
     isPlaying = true;
     applyBrightness();
@@ -301,20 +479,42 @@ void loop() {
       musicTrack = (musicTrack - 2 + totalMusicTracks) % totalMusicTracks + 1;
       Serial.print("[BTN] PREV → MUSIC track "); Serial.println(musicTrack);
       playerPlayFolderTrack(MUSIC_FOLDER, musicTrack);
+      untrackOther(true);
       playContext = CTX_MUSIC;
       spinSeed = musicTrack;
+    } else if (isPlaying && otherPlaying > 0 && currentPosSec() > PREV_RESTART_S) {
+      // Like a regular player: past the first seconds, PREV restarts the current track.
+      rfidTrack = otherPlaying;
+      Serial.print("[BTN] PREV → restart OTHER track "); Serial.println(rfidTrack);
+      playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
+      playContext = CTX_RFID;
+      spinSeed = rfidTrack;
+      savePos(rfidTrack, 0);
+      trackOther(rfidTrack, false);
     } else {
+      untrackOther(true);
       rfidTrack = (rfidTrack - 2 + totalRfidTracks) % totalRfidTracks + 1;
       Serial.print("[BTN] PREV → RFID track "); Serial.println(rfidTrack);
       playerPlayFolderTrack(RFID_FOLDER, rfidTrack);
       playContext = CTX_RFID;
       spinSeed = rfidTrack;
+      trackOther(rfidTrack, true);
     }
     isPlaying = true;
     applyBrightness();
     randomizeSpinner(spinSeed);
     startSweep(false, CRGB::Yellow);
     prevMode = ANIM_SPINNER;
+  }
+
+  // ── Factory reset: PLAY + NEXT + PREV held for FACTORY_RESET_MS ──
+  static uint32_t allHeldSince = 0;
+  if (btnPlay.state == LOW && btnNext.state == LOW && btnPrev.state == LOW) {
+    seekUsed = true; // suppress the Play action on release
+    if (allHeldSince == 0) allHeldSince = millis();
+    else if (millis() - allHeldSince >= FACTORY_RESET_MS) factoryReset();
+  } else {
+    allHeldSince = 0;
   }
 
   // ── RFID programming mode ──
@@ -353,6 +553,7 @@ void loop() {
   } else {
     char rfidPath[32];
     int result = rfidReadPath(rfidPath, sizeof(rfidPath));
+    if (result != 0) lastActivityMs = millis();
     if (result == 1) {
       if (isPlaying && playContext == CTX_RFID && strcmp(rfidPath, lastRfidPath) == 0) {
         Serial.println("[RFID] Already playing this track, ignoring");
@@ -361,7 +562,12 @@ void loop() {
         playContext = CTX_RFID;
         Serial.print("[RFID] Playing ");
         Serial.println(rfidPath);
+        untrackOther(true);
         playerPlayPath(rfidPath);
+        if (strncmp(rfidPath, "/" RFID_FOLDER "/", strlen(RFID_FOLDER) + 2) == 0) {
+          int n = atoi(rfidPath + strlen(RFID_FOLDER) + 2);
+          if (n > 0) trackOther(n, true);
+        }
         isPlaying = true;
         applyBrightness();
         randomizeSpinner(hashPath(rfidPath));
@@ -377,5 +583,19 @@ void loop() {
   if (isPlaying)
     checkTrackEnd();
 
+  // ── Idle tracking / auto power-off ──
+  if (isPlaying || inProgramMode || delta != 0 || playEvent != 0 ||
+      nextEvent != 0 || prevEvent != 0 || btnPlay.state == LOW ||
+      btnNext.state == LOW || btnPrev.state == LOW)
+    lastActivityMs = millis();
+  else if (millis() - lastActivityMs >= IDLE_SLEEP_MS)
+    goToSleep();
+
+  if (otherPlaying > 0 && isPlaying && millis() - lastPosSaveMs >= POS_SAVE_EVERY_MS) {
+    savePos(otherPlaying, currentPosSec());
+    lastPosSaveMs = millis();
+  }
+
+  saveStateIfChanged();
   updateLEDs();
 }

@@ -23,8 +23,8 @@ My own take on the [ESPuino](https://github.com/biologist79/ESPuino) / [Tonuino]
 | WS2812 +5V | 5V |
 | WS2812 GND | GND |
 | Play/Stop button | GPIO 12 → GND |
-| Next button | GPIO 13 → GND |
-| Prev button | GPIO 14 → GND |
+| Next button | GPIO 14 → GND |
+| Prev button | GPIO 13 → GND |
 | KY-040 CLK | GPIO 18 |
 | KY-040 DT | GPIO 19 |
 | KY-040 + | 3.3V |
@@ -77,6 +77,7 @@ While stopped, hold Next for 5 seconds to toggle between MUSIC and OTHER browse 
 | Library | Source |
 |---|---|
 | **FastLED** ≥ 3.6 | Arduino Library Manager |
+| **MFRC522** | Arduino Library Manager |
 
 No library needed for the DY-SV5W — it speaks raw UART at 9600 baud, handled directly by the ESP32's `HardwareSerial` (`Serial2`). For the UART protocol details (especially the quirky path encoding for command `0x08`, where `/MUSIC/00001.mp3` must be sent as `/MUSIC*/00001*MP3`), the [SnijderC/dyplayer](https://github.com/SnijderC/dyplayer) library is a useful reference implementation.
 
@@ -91,10 +92,27 @@ No library needed for the DY-SV5W — it speaks raw UART at 9600 baud, handled d
 
 Set the module to **UART control mode**: CON3=1, CON2=0, CON1=0.
 
+## Controls
+
+| Action | Result |
+|---|---|
+| Play/Stop | Stop, or play the current track of the current mode |
+| Next / Prev | Next / previous track (OTHER: resumes from the saved position; Prev after 10 s restarts the track) |
+| Encoder | Volume (2–14 of the module's 0–30 scale) |
+| Play held + encoder | Seek ±5 s per tick |
+| Prev held + encoder | LED brightness, level 0 (off) – 10 (max) |
+| Next held 5 s (stopped) | Toggle MUSIC / OTHER browse mode |
+| Next + Prev held, then tap a card | Write the current track path to the card |
+| Play + Next + Prev held 15 s | Factory reset: erase saved state, LEDs blink red, reboot |
+
+## Saved state (NVS)
+
+Survives power-off and re-flashing (as long as "Erase All Flash" is off and the partition scheme is unchanged): last mode, last track per mode, volume, LED level, and the playback position of every OTHER track (resume point). After 10 minutes of inactivity the ESP32 enters deep sleep; press Play to wake it.
+
+## Flashing
+
+`scripts/flash.sh build` compiles, `scripts/flash.sh upload [port]` also uploads (uses the arduino-cli bundled with Arduino IDE, board `esp32:esp32:esp32`). Libraries: FastLED, MFRC522.
+
 ## Adjusting volume
 
-Change the value in `setup()`:
-
-```cpp
-playerVolume(25);  // 0–30
-```
+Limits and default are `VOLUME_MIN`, `VOLUME_MAX`, `VOLUME_DEFAULT` in `Jukebox.ino` (the last used volume is restored on boot).
