@@ -1,15 +1,14 @@
 #!/bin/bash
-# Build and upload the Jukebox sketch via Serial or Over-The-Air (Wi-Fi).
+# Build and upload the Jukebox sketch via Serial or Over-The-Air (Wi-Fi WebOTA).
 # Usage:
 #   scripts/flash.sh build
 #   scripts/flash.sh upload [serial_port]   (default: first /dev/cu.usbserial-*)
-#   scripts/flash.sh ota [ip_or_hostname]   (default: adabox.local)
+#   scripts/flash.sh ota [ip_or_hostname]   (default: adabox.lan)
 set -e
 CLI="/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 FQBN="esp32:esp32:esp32"   # ESP32 Dev Module, default partition scheme (keeps NVS intact)
 BUILD_DIR="/tmp/jukebox-build"
-ESPOTA="$(find ~/Library/Arduino15/packages/esp32 -name "espota.py" 2>/dev/null | head -1)"
 ESPTOOL="$(find ~/Library/Arduino15/packages/esp32 -name "esptool" -type f 2>/dev/null | head -1)"
 
 echo "==> Compiling Jukebox sketch (FQBN: $FQBN)..."
@@ -30,29 +29,14 @@ if [ "$ACTION" = "upload" ]; then
   fi
   echo "==> Uploading via USB serial ($PORT)..."
   "$CLI" upload --fqbn "$FQBN" --port "$PORT" --input-dir "$BUILD_DIR" "$SRC"
-elif [ "$ACTION" = "ota" ]; then
+elif [ "$ACTION" = "ota" ] || [ "$ACTION" = "web-ota" ]; then
   TARGET="${2:-adabox.lan}"
   if [ ! -f "$BIN" ]; then
     echo "Error: Binary not found at $BIN" >&2
     exit 1
   fi
-  if [ -z "$ESPOTA" ]; then
-    echo "Error: espota.py tool not found in Arduino15 packages!" >&2
-    exit 1
-  fi
-  HOST_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo '')"
-  HOST_FLAG=""
-  if [ -n "$HOST_IP" ]; then
-    HOST_FLAG="-I $HOST_IP"
-  fi
-  echo "==> Uploading over-the-air (OTA) to $TARGET:3232 (Host IP: ${HOST_IP:-auto})..."
-  python3 "$ESPOTA" -i "$TARGET" $HOST_FLAG -p 3232 -f "$BIN" -t 30 -r
-elif [ "$ACTION" = "web-ota" ]; then
-  TARGET="${2:-adabox.lan}"
-  if [ ! -f "$BIN" ]; then
-    echo "Error: Binary not found at $BIN" >&2
-    exit 1
-  fi
-  echo "==> Uploading via HTTP WebOTA to http://$TARGET/update..."
-  curl -v -F "update=@$BIN" "http://$TARGET/update"
+  echo "==> Uploading over-the-air (WebOTA) to http://$TARGET/update..."
+  curl -f -F "update=@$BIN" "http://$TARGET/update"
+  echo ""
+  echo "==> WebOTA upload completed successfully! AdaBox is rebooting..."
 fi

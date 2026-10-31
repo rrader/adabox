@@ -118,7 +118,7 @@ AdaBox includes Wi-Fi support with a captive portal for setup without hardcoded 
 - **Captive Portal:** If no Wi-Fi credentials are stored, AdaBox starts a Wi-Fi hotspot `AdaBox-Setup` (192.168.4.1) with a captive portal to select and save Wi-Fi network details into NVS.
 - **Web UI:** Accessible on the local network at `http://adabox.lan/` (or `http://adabox.local/`) to view status, mode, track, volume, and LED level.
 - **JSON API:** `GET http://adabox.lan/info` returns pure JSON for home automation.
-- **OTA Updates:** Web-based firmware update page at `http://adabox.lan/update` and ArduinoOTA on port 3232.
+- **OTA Updates:** Web-based firmware update page at `http://adabox.lan/update` (upload compiled `.bin` via browser or `scripts/flash.sh ota adabox.lan`).
 
 ## Home Assistant Integration
 

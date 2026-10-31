@@ -46,10 +46,10 @@ struct Btn {
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <WebServer.h>
-#include <ArduinoOTA.h>
+#include <Update.h>
 #include <ESPmDNS.h>
 
-#define FW_VERSION  "2.2.2"
+#define FW_VERSION  "2.3.0"
 #define DEVICE_NAME "adabox"
 #define AP_SSID     "AdaBox-Setup"
 
@@ -102,7 +102,6 @@ int savedMusicTrack = -1, savedRfidTrack = -1, savedBrowse = -1;
 
 WebServer server(80);
 DNSServer dnsServer;
-bool otaReady = false;
 volatile bool isOtaUpdating = false;
 bool apMode = false;
 bool wifiConnected = false;
@@ -135,39 +134,7 @@ bool prevHeldWithNext = false;
 bool inProgramMode = false;
 uint32_t programModeStart = 0;
 
-// ── Wi-Fi Captive Portal, WebServer & OTA ─────────────────────────────────────
-void setupOTA() {
-  ArduinoOTA.setHostname(DEVICE_NAME);
-  ArduinoOTA.onStart([]() {
-    isOtaUpdating = true;
-    Serial.println("[OTA] Firmware update started!");
-    playerStop();
-    fill_solid(leds, NUM_LEDS, CRGB::Blue);
-    FastLED.show();
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    int lit = (progress * NUM_LEDS) / total;
-    for (int i = 0; i < NUM_LEDS; i++)
-      leds[i] = (i <= lit) ? CRGB::Cyan : CRGB::Black;
-    FastLED.show();
-  });
-  ArduinoOTA.onEnd([]() {
-    isOtaUpdating = false;
-    fill_solid(leds, NUM_LEDS, CRGB::Green);
-    FastLED.show();
-    Serial.println("\n[OTA] Update complete! Rebooting...");
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    isOtaUpdating = false;
-    Serial.printf("[OTA] Error[%u]\n", error);
-    fill_solid(leds, NUM_LEDS, CRGB::Red);
-    FastLED.show();
-  });
-  ArduinoOTA.begin();
-  otaReady = true;
-  Serial.print("[OTA] Ready at "); Serial.print(DEVICE_NAME); Serial.println(".local");
-}
-
+// ── Wi-Fi Captive Portal & WebServer ──────────────────────────────────────────
 void setupWebServer() {
   server.on("/", []() {
     if (apMode) {
@@ -279,7 +246,8 @@ void setupWebServer() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       isOtaUpdating = true;
-      Serial.printf("[WebOTA] Update: %s\n", upload.filename.c_str());
+      Serial.printf("[WebOTA] Update starting: %s\n", upload.filename.c_str());
+      playerStop();
       fill_solid(leds, NUM_LEDS, CRGB::Blue);
       FastLED.show();
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
@@ -355,7 +323,6 @@ void wifiSetup() {
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
     Serial.print("[WiFi] Connected! IP: "); Serial.println(WiFi.localIP());
-    setupOTA();
     setupWebServer();
   } else {
     Serial.println("[WiFi] Connection failed. Starting fallback hotspot...");
@@ -617,7 +584,6 @@ void setup() {
 
 void loop() {
   if (isOtaUpdating) {
-    ArduinoOTA.handle();
     server.handleClient();
     return;
   }
@@ -870,13 +836,11 @@ void loop() {
   saveStateIfChanged();
   updateLEDs();
 
-  // ── WiFi, Captive Portal & OTA ──
+  // ── WiFi, Captive Portal & WebServer ──
   if (apMode) {
     dnsServer.processNextRequest();
     server.handleClient();
   } else if (WiFi.status() == WL_CONNECTED) {
-    if (!otaReady) setupOTA();
-    ArduinoOTA.handle();
     server.handleClient();
   }
 }

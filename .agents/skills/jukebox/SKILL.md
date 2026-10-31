@@ -39,9 +39,9 @@ ESP32 devkit (Keyestudio ESP32-WROOM-32D), DY-SV5W (TF до 32 ГБ, динам�
 DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9600 8N1.
 Залежності Arduino IDE: плата **ESP32 Dev Module**, бібліотеки **FastLED ≥ 3.6**, **MFRC522**; `Preferences` — вбудована в ESP32 core. Прошивка: `scripts/flash.sh build|upload [port]|ota [ip]` (arduino-cli з Arduino IDE, збирає на місці; головний файл скетча називається `jukebox.ino`, щоб збігатися з назвою папки `jukebox` (вимога Arduino); FQBN `esp32:esp32:esp32`, ESP32 core 3.3.8, FastLED/MFRC522 вже встановлені). Плата Романа: ESP32-D0WD-V3 rev 3.1, 4 МБ флеш, USB-міст CP2102 (`/dev/cu.usbserial-0001`), MAC 30:76:f5:ee:bc:04; `esptool` є в brew.
 
-## Мережа, Wi-Fi Captive Portal, OTA та Home Assistant
+## Мережа, Wi-Fi Captive Portal, WebOTA та Home Assistant
 
-- **Версія прошивки:** `v2.2.2` (`#define FW_VERSION "2.2.2"` у `jukebox.ino`).
+- **Версія прошивки:** `v2.3.0` (`#define FW_VERSION "2.3.0"` у `jukebox.ino`).
 - **Wi-Fi Hotspot & Captive Portal:** Якщо в NVS немає креденшелів Wi-Fi, запускається точка доступу `AdaBox-Setup` (192.168.4.1) з DNS Captive Portal. Користувач обирає мережу або вводить вручну SSID і пароль, дані зберігаються в NVS (`prefs.putString("wifi_ssid", ...)`), плата перезавантажується та підключається до Wi-Fi. Паролі не хардкодяться в коді.
 - **Статичний IP та локальний домен на UniFi UDR7:**
   - MAC-адреса: `30:76:f5:ee:bc:04`.
@@ -49,10 +49,11 @@ DIP-перемикачі DY-SV5W: UART-режим CON3=1, CON2=0, CON1=0. UART 9
   - Локальний домен: `adabox.lan` (також `adabox` і mDNS `adabox.local`), налаштовано у `/run/dnsmasq.dhcp.conf.d/adabox.conf` на UDR7. Не резолвити через `*.rmn.pp.ua`, щоб не потрапляти у проксі Cloudflare.
 - **Веб-інтерфейс та API:**
   - Головна сторінка: `http://adabox.lan/` — статус, поточний режим, трек, гучність, LED, посилання на OTA.
-  - JSON API: `http://adabox.lan/info` — повертає `{"name":"adabox","version":"2.2.2","status":"idle","mode":"OTHER","track":1,"volume":12,"led":4,"rssi":-75,"ip":"192.168.1.88"}` для автоматизації.
-  - Оновлення прошивки:
-    - **WebOTA (`/update`):** браузерна форма та прямий multipart POST (`scripts/flash.sh web-ota adabox.lan`). Працює незалежно від фаєрволу Mac, бо використовує вихідний HTTP-клієнт.
-    - **ArduinoOTA (порт 3232):** `scripts/flash.sh ota adabox.lan`. Автоматично визначає локальний IP Mac (`-I $HOST_IP`), щоб уникнути конфліктів із macOS VPN/Teleport (`utun0`).
+  - JSON API: `http://adabox.lan/info` — повертає `{"name":"adabox","version":"2.3.0","status":"idle","mode":"OTHER","track":1,"volume":12,"led":4,"rssi":-71,"ip":"192.168.1.88"}` для автоматизації.
+  - **Бездротове оновлення (WebOTA через порт 80):**
+    - Єдиний надійний метод бездротової прошивки — нативний **WebOTA** (`<Update.h>`). Бібліотеку `ArduinoOTA` повністю вимкнено та видалено (це зекономило >21 КБ Flash та 2.5 КБ RAM, усунуло зайвий фоновий UDP-сокет на порту 3232).
+    - **Командний рядок:** `scripts/flash.sh ota [target]` (за замовчуванням `adabox.lan`) компілює скетч і заливає бінарник через curl (`POST /update`). Не боїться системного фаєрволу macOS та VPN.
+    - **Веб-інтерфейс:** сторінка `http://adabox.lan/update` дозволяє вибрати `jukebox.ino.bin` і прошити плату прямо з браузера (комп'ютер, телефон, планшет).
     - **Ізоляція процесора під час OTA:** прапорець `isOtaUpdating` на початку `loop()` заморожує `FastLED.show()` (який апаратно блокує переривання для WS2812), опитування MFRC522 по SPI та UART плеєра, віддаючи 100% CPU мережі та запису у Flash.
 - **Збереження стану (NVS) та виправлення багів:**
   - **LED Level:** ключ `led` (0–10). Раніше `prefs.end()` викликався перед читанням `prefs.getInt("led")`, що скидало яскравість до 10 після вимкнення живлення. Виправлено: `prefs.end()` закривається після зчитування всіх параметрів.
