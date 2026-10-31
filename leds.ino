@@ -115,8 +115,75 @@ void startSweep(bool cw, CRGB color) {
   lastLedMs = 0; // render first frame immediately
 }
 
+// ── Overlays: temporary static displays drawn over the animations ────────────
+// OVL_VOLUME / OVL_LED: arc of 1..16 LEDs proportional to the value.
+// OVL_TRACK: track number as dots. Track 1..16 → that many LEDs lit in ring
+// colour #0; every further 16 tracks start a new ring with the next colour,
+// the previous ring's colour stays on the unlit remainder. E.g. track 17 =
+// 1 LED colour #1 + 15 LEDs colour #0. Adjacent colours (incl. wrap 9→0) are
+// strongly contrasting.
+static const CRGB TRACK_RING_COLORS[10] = {
+  CRGB(255,   0,   0),  // 0 red
+  CRGB(  0, 255, 255),  // 1 cyan
+  CRGB(255, 200,   0),  // 2 yellow
+  CRGB(  0,   0, 255),  // 3 blue
+  CRGB(  0, 255,   0),  // 4 green
+  CRGB(255,   0, 255),  // 5 magenta
+  CRGB(255,  90,   0),  // 6 orange
+  CRGB(255, 255, 255),  // 7 white
+  CRGB(130,   0, 255),  // 8 violet
+  CRGB(160, 255,   0),  // 9 lime
+};
+
+int overlayKind = 0;
+int overlayValue = 0;
+uint32_t overlayUntil = 0;
+uint32_t overlayLastMs = 0;
+
+void showOverlay(int kind, int value) {
+  overlayKind = kind;
+  overlayValue = value;
+  overlayUntil = millis() + (kind == OVL_TRACK ? OVERLAY_TRACK_MS : OVERLAY_VALUE_MS);
+  overlayLastMs = 0;
+}
+
+static void renderOverlay() {
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  if (overlayKind == OVL_TRACK) {
+    int t = max(overlayValue, 1) - 1;          // 0-based
+    int ring = t / NUM_LEDS;                   // which ring of 16
+    int lit = t % NUM_LEDS + 1;                // dots in the current ring
+    CRGB cur  = TRACK_RING_COLORS[ring % 10];
+    CRGB prev = TRACK_RING_COLORS[(ring + 9) % 10];
+    for (int i = 0; i < NUM_LEDS; i++)
+      leds[i] = i < lit ? cur : (ring > 0 ? prev : CRGB(CRGB::Black));
+  } else {
+    int n = 0;
+    CRGB c;
+    if (overlayKind == OVL_VOLUME) {
+      n = 1 + (overlayValue - VOLUME_MIN) * (NUM_LEDS - 1) / (VOLUME_MAX - VOLUME_MIN);
+      c = CRGB(0, 160, 255);                   // blue arc = volume
+    } else {
+      n = overlayValue * NUM_LEDS / LED_LEVEL_MAX;
+      c = CRGB(255, 170, 40);                  // warm arc = LED brightness
+    }
+    for (int i = 0; i < n && i < NUM_LEDS; i++) leds[i] = c;
+  }
+  FastLED.show();
+}
+
 void updateLEDs() {
   uint32_t now = millis();
+
+  if (overlayKind) {
+    if ((int32_t)(now - overlayUntil) >= 0) {
+      overlayKind = 0;
+      lastLedMs = 0; // let the animation redraw immediately
+    } else {
+      if (now - overlayLastMs >= 30) { overlayLastMs = now; renderOverlay(); }
+      return;
+    }
+  }
 
   switch (animMode) {
 

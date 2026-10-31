@@ -69,6 +69,11 @@ struct Btn {
 #define VOLUME_DEFAULT 8
 #define IDLE_SLEEP_MS (10UL * 60UL * 1000UL) // deep sleep after 10 min of inactivity
 #define FACTORY_RESET_MS 15000   // all 3 buttons held this long → wipe saved state
+#define OVL_VOLUME 1             // LED overlays (see leds.ino): volume arc,
+#define OVL_LED    2             // LED brightness arc,
+#define OVL_TRACK  3             // track number (dots + colour per ring of 16)
+#define OVERLAY_VALUE_MS 1200
+#define OVERLAY_TRACK_MS 2000
 #define SEEK_SECONDS 5   // seconds per encoder tick in seek mode
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -302,6 +307,7 @@ void checkTrackEnd() {
       applyBrightness();
       randomizeSpinner(musicTrack);
       animMode = ANIM_SPINNER;
+      showOverlay(OVL_TRACK, musicTrack);
     } else {
       if (otherPlaying > 0) untrackOther(false); // finished → start over next time
       applyBrightness(); // restore brightness after RFID track ends
@@ -365,6 +371,7 @@ void loop() {
       Serial.print("[ENC] LED level → "); Serial.println(ledLevel);
       ledLevelChangedAt = millis();
       applyBrightness();
+      showOverlay(OVL_LED, ledLevel);
     } else if (btnPlay.state == LOW) {
       int secs = delta * SEEK_SECONDS;
       Serial.print("[ENC] Seek ");
@@ -381,6 +388,7 @@ void loop() {
       Serial.println(currentVolume);
       playerVolume(currentVolume);
       volumeChangedAt = millis();
+      showOverlay(OVL_VOLUME, currentVolume);
     }
   }
 
@@ -468,6 +476,7 @@ void loop() {
     randomizeSpinner(spinSeed);
     startSweep(true, CRGB::Cyan);
     prevMode = ANIM_SPINNER;
+    showOverlay(OVL_TRACK, browseMode == BROWSE_MUSIC ? musicTrack : rfidTrack);
   }
 
   // ── Prev ──
@@ -505,6 +514,7 @@ void loop() {
     randomizeSpinner(spinSeed);
     startSweep(false, CRGB::Yellow);
     prevMode = ANIM_SPINNER;
+    showOverlay(OVL_TRACK, browseMode == BROWSE_MUSIC ? musicTrack : rfidTrack);
   }
 
   // ── Factory reset: PLAY + NEXT + PREV held for FACTORY_RESET_MS ──
