@@ -28,6 +28,7 @@ uint8_t progSuccessStep = 0;
 
 void ledSetup() {
   FastLED.addLeds<WS2812, PIN_LED, GRB>(leds, NUM_LEDS);
+  FastLED.setDither(BINARY_DITHER);
   FastLED.setBrightness(LED_BRIGHTNESS);
   fill_solid(leds, NUM_LEDS, CRGB::Black);
   FastLED.show();
@@ -208,12 +209,12 @@ void updateLEDs() {
   switch (animMode) {
 
   case ANIM_BREATHE: {
-    if (now - lastLedMs < 20)
+    if (now - lastLedMs < 10) // 100 FPS refresh for smooth FastLED temporal dithering
       break;
     lastLedMs = now;
-    // Mathematically continuous sine-wave breathing locked to clock: 16 BPM, smooth 8-bit curve
-    uint8_t breathVal = beatsin8(16, 5, 180);
-    fill_solid(leds, NUM_LEDS, CHSV(96, 220, breathVal)); // green idle
+    uint8_t rawSine = beatsin8(14, 15, 255);
+    uint8_t breathVal = dim8_video(rawSine);
+    fill_solid(leds, NUM_LEDS, CHSV(96, 220, breathVal));
     FastLED.show();
     break;
   }

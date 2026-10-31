@@ -49,7 +49,7 @@ struct Btn {
 #include <Update.h>
 #include <ESPmDNS.h>
 
-#define FW_VERSION  "2.3.2"
+#define FW_VERSION  "2.3.3"
 #define DEVICE_NAME "adabox"
 #define AP_SSID     "AdaBox-Setup"
 
